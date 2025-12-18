@@ -775,8 +775,9 @@
                 if (room.type === 'enemy') {
                     // Combat
                     const enemyKey = floor.enemies[Math.floor(Math.random() * floor.enemies.length)];
+                    setCurrentRoom(currentRoom + 1); // Incrémenter avant le combat
                     startCombat(enemyKey);
-                    return; // BUG FIX: Ajout du return ici !
+                    return;
                 } else if (room.type === 'treasure') {
                     // Coffre
                     const treasureType = Math.random();
@@ -993,8 +994,9 @@
                                 onClick={() => {
                                     if (dialogue?.onClose) {
                                         dialogue.onClose();
+                                    } else {
+                                        setGameState(GAME_STATES.EXPLORATION);
                                     }
-                                    setGameState(GAME_STATES.EXPLORATION);
                                     setDialogue(null);
                                 }}
                                 className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg transition-all"
