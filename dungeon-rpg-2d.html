@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Le Donjon des Ténèbres - RPG 2D</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #1a1a2e;
+            font-family: system-ui, -apple-system, sans-serif;
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+        }
+
+        .game-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        }
+
+        .stats-bar {
+            background: #0f0f1e;
+            border-bottom: 3px solid #8b5cf6;
+            padding: 12px 20px;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+        }
+
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: #9ca3af;
+            text-transform: uppercase;
+        }
+
+        .stat-bar {
+            background: #374151;
+            height: 16px;
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .stat-bar-fill {
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+
+        .hp-fill { background: linear-gradient(90deg, #ef4444, #dc2626); }
+        .mp-fill { background: linear-gradient(90deg, #3b82f6, #2563eb); }
+
+        .stat-text {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            align-items: center;
+            justify-center;
+            font-size: 11px;
+            font-weight: bold;
+            color: white;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+        }
+
+        .canvas-container {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+
+        .controls-hint {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            pointer-events: none;
+            animation: fadeIn 0.5s;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+            to { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+
+        .combat-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.95);
+            display: flex;
+            align-items: center;
+            justify-center;
+            z-index: 1000;
+            animation: fadeIn 0.3s;
+        }
+
+        .combat-panel {
+            background: #1f2937;
+            border: 3px solid #ef4444;
+            border-radius: 16px;
+            padding: 32px;
+            max-width: 800px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .enemy-display {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+
+        .enemy-name {
+            font-size: 32px;
+            color: #ef4444;
+            font-weight: bold;
+            margin-bottom: 12px;
+        }
+
+        .battle-log {
+            background: #111827;
+            padding: 16px;
+            border-radius: 8px;
+            max-height: 150px;
+            overflow-y: auto;
+            margin-bottom: 24px;
+            font-size: 13px;
+        }
+
+        .log-entry {
+            margin: 4px 0;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .log-success { color: #10b981; }
+        .log-danger { color: #ef4444; }
+        .log-warning { color: #f59e0b; }
+        .log-info { color: #60a5fa; }
+
+        .actions-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+        }
+
+        .action-section {
+            background: #111827;
+            padding: 16px;
+            border-radius: 8px;
+        }
+
+        .action-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 12px;
+            color: #a78bfa;
+        }
+
+        .skill-button, .item-button {
+            width: 100%;
+            padding: 12px;
+            margin: 6px 0;
+            border-radius: 6px;
+            border: 2px solid;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: left;
+        }
+
+        .skill-button {
+            background: #1e3a8a;
+            border-color: #3b82f6;
+            color: white;
+        }
+
+        .skill-button:hover:not(:disabled) {
+            background: #1e40af;
+            transform: translateY(-2px);
+        }
+
+        .skill-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .item-button {
+            background: #065f46;
+            border-color: #10b981;
+            color: white;
+        }
+
+        .item-button:hover {
+            background: #047857;
+            transform: translateY(-2px);
+        }
+
+        .flee-button {
+            width: 100%;
+            padding: 16px;
+            background: #92400e;
+            border: 2px solid #f59e0b;
+            border-radius: 6px;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 16px;
+        }
+
+        .flee-button:hover {
+            background: #b45309;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // ==================== CONSTANTES ====================
+
+        const TILE_SIZE = 48;
+        const CANVAS_WIDTH = 960;
+        const CANVAS_HEIGHT = 640;
+
+        const GAME_STATES = {
+            TITLE: 'TITLE',
+            EXPLORATION: 'EXPLORATION',
+            COMBAT: 'COMBAT',
+            VICTORY: 'VICTORY',
+            GAME_OVER: 'GAME_OVER'
+        };
+
+        const PLAYER_BASE_STATS = {
+            maxHp: 100,
+            currentHp: 100,
+            maxMp: 30,
+            currentMp: 30,
+            attack: 15,
+            defense: 8,
+            magic: 12,
+            speed: 10,
+            level: 1,
+            exp: 0,
+            expToNextLevel: 100,
+            gold: 0
+        };
+
+        const SKILLS = {
+            attack: { name: "Attaque", mpCost: 0, multiplier: 1, type: "physical" },
+            defend: { name: "Défense", mpCost: 0, type: "support", effect: "defense" },
+            heal: { name: "Soin", mpCost: 8, type: "magic", healing: 30 },
+            powerStrike: { name: "Frappe Puissante", mpCost: 5, multiplier: 1.8, type: "physical", level: 3 },
+            fireball: { name: "Boule de Feu", mpCost: 12, multiplier: 2.5, type: "magic", level: 4 }
+        };
+
+        const ENEMIES = {
+            slime: { name: "Slime 💧", hp: 25, attack: 8, defense: 2, speed: 5, exp: 15, gold: 10, color: "#10b981" },
+            bat: { name: "Chauve-souris 🦇", hp: 20, attack: 10, defense: 1, speed: 12, exp: 18, gold: 8, color: "#8b5cf6" },
+            goblin: { name: "Gobelin 👺", hp: 35, attack: 12, defense: 4, speed: 7, exp: 25, gold: 15, color: "#ef4444" },
+            skeleton: { name: "Squelette 💀", hp: 40, attack: 15, defense: 6, speed: 8, exp: 35, gold: 18, color: "#f3f4f6" },
+            boss: { name: "Boss 👑", hp: 150, attack: 20, defense: 10, speed: 6, exp: 100, gold: 100, color: "#fbbf24" }
+        };
+
+        const ITEMS = {
+            potion: { name: "Potion", effect: "heal", value: 30, emoji: "🧪" },
+            ether: { name: "Éther", effect: "mp", value: 15, emoji: "✨" },
+            key: { name: "Clé", effect: "key", emoji: "🗝️" }
+        };
+
+        // ==================== COMPOSANT PRINCIPAL ====================
+
+        function DungeonRPG2D() {
+            const canvasRef = useRef(null);
+            const [gameState, setGameState] = useState(GAME_STATES.TITLE);
+            const [player, setPlayer] = useState({ ...PLAYER_BASE_STATS });
+            const [inventory, setInventory] = useState({ potion: 3, ether: 1 });
+            const [combat, setCombat] = useState(null);
+            const [battleLog, setBattleLog] = useState([]);
+
+            // Exploration 2D
+            const [heroPos, setHeroPos] = useState({ x: 5, y: 5 });
+            const [dungeon, setDungeon] = useState([]);
+            const [entities, setEntities] = useState([]);
+            const keysPressed = useRef(new Set());
+
+            // Générer le donjon
+            useEffect(() => {
+                if (gameState === GAME_STATES.EXPLORATION && dungeon.length === 0) {
+                    generateDungeon();
+                }
+            }, [gameState]);
+
+            const generateDungeon = () => {
+                const width = 20;
+                const height = 15;
+                const map = [];
+
+                // Créer la base
+                for (let y = 0; y < height; y++) {
+                    map[y] = [];
+                    for (let x = 0; x < width; x++) {
+                        if (x === 0 || x === width - 1 || y === 0 || y === height - 1) {
+                            map[y][x] = { type: 'wall' };
+                        } else {
+                            map[y][x] = { type: 'floor' };
+                        }
+                    }
+                }
+
+                // Ajouter des obstacles aléatoires
+                for (let i = 0; i < 30; i++) {
+                    const x = Math.floor(Math.random() * (width - 2)) + 1;
+                    const y = Math.floor(Math.random() * (height - 2)) + 1;
+                    if (Math.abs(x - 5) > 2 || Math.abs(y - 5) > 2) {
+                        map[y][x] = { type: 'wall' };
+                    }
+                }
+
+                setDungeon(map);
+
+                // Générer des entités (ennemis, objets)
+                const newEntities = [];
+                const enemyTypes = ['slime', 'bat', 'goblin', 'skeleton'];
+
+                // Ennemis
+                for (let i = 0; i < 10; i++) {
+                    const x = Math.floor(Math.random() * (width - 4)) + 2;
+                    const y = Math.floor(Math.random() * (height - 4)) + 2;
+                    if (map[y][x].type === 'floor' && (Math.abs(x - 5) > 3 || Math.abs(y - 5) > 3)) {
+                        newEntities.push({
+                            id: `enemy_${i}`,
+                            type: 'enemy',
+                            enemyType: enemyTypes[Math.floor(Math.random() * enemyTypes.length)],
+                            x,
+                            y,
+                            emoji: '👾'
+                        });
+                    }
+                }
+
+                // Objets
+                for (let i = 0; i < 5; i++) {
+                    const x = Math.floor(Math.random() * (width - 4)) + 2;
+                    const y = Math.floor(Math.random() * (height - 4)) + 2;
+                    if (map[y][x].type === 'floor') {
+                        const itemType = Math.random() > 0.5 ? 'potion' : 'ether';
+                        newEntities.push({
+                            id: `item_${i}`,
+                            type: 'item',
+                            itemType,
+                            x,
+                            y,
+                            emoji: ITEMS[itemType].emoji
+                        });
+                    }
+                }
+
+                // Boss dans un coin
+                newEntities.push({
+                    id: 'boss',
+                    type: 'enemy',
+                    enemyType: 'boss',
+                    x: width - 3,
+                    y: height - 3,
+                    emoji: '👑'
+                });
+
+                setEntities(newEntities);
+                setHeroPos({ x: 5, y: 5 });
+            };
+
+            // Gestion du clavier
+            useEffect(() => {
+                const handleKeyDown = (e) => {
+                    if (gameState !== GAME_STATES.EXPLORATION) return;
+                    keysPressed.current.add(e.key.toLowerCase());
+                };
+
+                const handleKeyUp = (e) => {
+                    keysPressed.current.delete(e.key.toLowerCase());
+                };
+
+                window.addEventListener('keydown', handleKeyDown);
+                window.addEventListener('keyup', handleKeyUp);
+
+                return () => {
+                    window.removeEventListener('keydown', handleKeyDown);
+                    window.removeEventListener('keyup', handleKeyUp);
+                };
+            }, [gameState]);
+
+            // Game loop pour le mouvement
+            useEffect(() => {
+                if (gameState !== GAME_STATES.EXPLORATION) return;
+
+                const interval = setInterval(() => {
+                    let dx = 0, dy = 0;
+
+                    if (keysPressed.current.has('arrowup') || keysPressed.current.has('w')) dy = -1;
+                    if (keysPressed.current.has('arrowdown') || keysPressed.current.has('s')) dy = 1;
+                    if (keysPressed.current.has('arrowleft') || keysPressed.current.has('a')) dx = -1;
+                    if (keysPressed.current.has('arrowright') || keysPressed.current.has('d')) dx = 1;
+
+                    if (dx !== 0 || dy !== 0) {
+                        moveHero(dx, dy);
+                    }
+                }, 150);
+
+                return () => clearInterval(interval);
+            }, [gameState, heroPos, dungeon, entities]);
+
+            const moveHero = (dx, dy) => {
+                const newX = heroPos.x + dx;
+                const newY = heroPos.y + dy;
+
+                // Vérifier les collisions
+                if (!dungeon[newY] || !dungeon[newY][newX] || dungeon[newY][newX].type === 'wall') {
+                    return;
+                }
+
+                // Vérifier les interactions avec les entités
+                const entityAtPos = entities.find(e => e.x === newX && e.y === newY);
+
+                if (entityAtPos) {
+                    if (entityAtPos.type === 'enemy') {
+                        // Démarrer un combat
+                        startCombat(entityAtPos);
+                        return;
+                    } else if (entityAtPos.type === 'item') {
+                        // Ramasser l'objet
+                        pickupItem(entityAtPos);
+                        setEntities(entities.filter(e => e.id !== entityAtPos.id));
+                    }
+                }
+
+                setHeroPos({ x: newX, y: newY });
+            };
+
+            const pickupItem = (entity) => {
+                setInventory(prev => ({
+                    ...prev,
+                    [entity.itemType]: (prev[entity.itemType] || 0) + 1
+                }));
+                addLog(`Vous avez ramassé ${ITEMS[entity.itemType].name} !`, 'success');
+            };
+
+            const startCombat = (entity) => {
+                const enemyData = ENEMIES[entity.enemyType];
+                setCombat({
+                    entity,
+                    enemy: {
+                        ...enemyData,
+                        currentHp: enemyData.hp,
+                        maxHp: enemyData.hp
+                    },
+                    playerDefending: false
+                });
+                setBattleLog([]);
+                addLog(`Un ${enemyData.name} apparaît !`, 'danger');
+                setGameState(GAME_STATES.COMBAT);
+            };
+
+            const addLog = (message, type = 'info') => {
+                setBattleLog(prev => [...prev, { message, type, id: Date.now() + Math.random() }]);
+            };
+
+            // Combat
+            const calculateDamage = (attacker, defender, skill) => {
+                const base = attacker.attack * (skill.multiplier || 1) - defender.defense * 0.5;
+                return Math.max(1, Math.floor(base * (0.85 + Math.random() * 0.3)));
+            };
+
+            const playerAction = (action) => {
+                if (!combat) return;
+
+                let newPlayer = { ...player };
+                let newEnemy = { ...combat.enemy };
+                let logs = [];
+
+                // Action du joueur
+                if (action.type === 'skill') {
+                    const skill = action.skill;
+
+                    if (skill.mpCost > newPlayer.currentMp) {
+                        addLog("Pas assez de MP !", 'warning');
+                        return;
+                    }
+
+                    newPlayer.currentMp -= skill.mpCost;
+
+                    if (skill.type === 'physical' || skill.type === 'magic') {
+                        const damage = calculateDamage(newPlayer, newEnemy, skill);
+                        newEnemy.currentHp -= damage;
+                        logs.push({ message: `${skill.name} ! ${damage} dégâts`, type: 'success' });
+                    } else if (skill.effect === 'defense') {
+                        setCombat(prev => ({ ...prev, playerDefending: true }));
+                        logs.push({ message: "Vous vous défendez !", type: 'info' });
+                    }
+
+                    if (skill.healing) {
+                        const heal = Math.min(skill.healing + newPlayer.magic, newPlayer.maxHp - newPlayer.currentHp);
+                        newPlayer.currentHp += heal;
+                        logs.push({ message: `+${heal} HP`, type: 'success' });
+                    }
+                } else if (action.type === 'item') {
+                    const item = ITEMS[action.itemKey];
+
+                    if (!inventory[action.itemKey] || inventory[action.itemKey] <= 0) {
+                        addLog("Vous n'avez pas cet objet !", 'warning');
+                        return;
+                    }
+
+                    setInventory(prev => ({
+                        ...prev,
+                        [action.itemKey]: prev[action.itemKey] - 1
+                    }));
+
+                    if (item.effect === 'heal') {
+                        const heal = Math.min(item.value, newPlayer.maxHp - newPlayer.currentHp);
+                        newPlayer.currentHp += heal;
+                        logs.push({ message: `${item.name} : +${heal} HP`, type: 'success' });
+                    } else if (item.effect === 'mp') {
+                        const mpGain = Math.min(item.value, newPlayer.maxMp - newPlayer.currentMp);
+                        newPlayer.currentMp += mpGain;
+                        logs.push({ message: `${item.name} : +${mpGain} MP`, type: 'success' });
+                    }
+                } else if (action.type === 'flee') {
+                    if (combat.entity.enemyType === 'boss') {
+                        addLog("Impossible de fuir le boss !", 'danger');
+                        return;
+                    }
+
+                    if (Math.random() < 0.5) {
+                        addLog("Vous avez fui !", 'success');
+                        setGameState(GAME_STATES.EXPLORATION);
+                        setCombat(null);
+                        return;
+                    } else {
+                        logs.push({ message: "La fuite a échoué !", 'warning' });
+                    }
+                }
+
+                // Vérifier la victoire
+                if (newEnemy.currentHp <= 0) {
+                    newPlayer.exp += newEnemy.exp || 0;
+                    newPlayer.gold += newEnemy.gold || 0;
+                    logs.push({ message: `Victoire ! +${newEnemy.exp} XP, +${newEnemy.gold} Or`, type: 'success' });
+
+                    // Supprimer l'ennemi du monde
+                    setEntities(entities.filter(e => e.id !== combat.entity.id));
+
+                    // Level up ?
+                    if (newPlayer.exp >= newPlayer.expToNextLevel) {
+                        newPlayer.level++;
+                        newPlayer.maxHp += 15;
+                        newPlayer.currentHp = newPlayer.maxHp;
+                        newPlayer.maxMp += 5;
+                        newPlayer.currentMp = newPlayer.maxMp;
+                        newPlayer.attack += 3;
+                        newPlayer.defense += 2;
+                        newPlayer.magic += 2;
+                        newPlayer.speed += 1;
+                        newPlayer.exp = 0;
+                        newPlayer.expToNextLevel = Math.floor(newPlayer.level * 100 * 1.5);
+                        logs.push({ message: `LEVEL UP ! Niveau ${newPlayer.level}`, type: 'success' });
+                    }
+
+                    // Vérifier la victoire finale
+                    if (combat.entity.enemyType === 'boss') {
+                        setPlayer(newPlayer);
+                        logs.forEach(l => addLog(l.message, l.type));
+                        setTimeout(() => setGameState(GAME_STATES.VICTORY), 2000);
+                        return;
+                    }
+
+                    setPlayer(newPlayer);
+                    logs.forEach(l => addLog(l.message, l.type));
+                    setTimeout(() => {
+                        setGameState(GAME_STATES.EXPLORATION);
+                        setCombat(null);
+                    }, 1500);
+                    return;
+                }
+
+                // Tour de l'ennemi
+                const enemyDamage = calculateDamage(newEnemy, newPlayer, { multiplier: 1 });
+                const finalDamage = combat.playerDefending ? Math.floor(enemyDamage * 0.5) : enemyDamage;
+                newPlayer.currentHp -= finalDamage;
+                logs.push({ message: `${newEnemy.name} attaque ! ${finalDamage} dégâts`, type: 'danger' });
+
+                // Vérifier la défaite
+                if (newPlayer.currentHp <= 0) {
+                    setPlayer(newPlayer);
+                    logs.forEach(l => addLog(l.message, l.type));
+                    setTimeout(() => setGameState(GAME_STATES.GAME_OVER), 1000);
+                    return;
+                }
+
+                setPlayer(newPlayer);
+                setCombat(prev => ({ ...prev, enemy: newEnemy, playerDefending: false }));
+                logs.forEach(l => addLog(l.message, l.type));
+            };
+
+            // Rendu Canvas
+            useEffect(() => {
+                if (gameState !== GAME_STATES.EXPLORATION || !canvasRef.current) return;
+
+                const canvas = canvasRef.current;
+                const ctx = canvas.getContext('2d');
+
+                // Effacer
+                ctx.fillStyle = '#111827';
+                ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+                if (dungeon.length === 0) return;
+
+                // Calculer l'offset pour centrer sur le héros
+                const offsetX = Math.floor(CANVAS_WIDTH / 2 / TILE_SIZE) - heroPos.x;
+                const offsetY = Math.floor(CANVAS_HEIGHT / 2 / TILE_SIZE) - heroPos.y;
+
+                // Dessiner le donjon
+                for (let y = 0; y < dungeon.length; y++) {
+                    for (let x = 0; x < dungeon[y].length; x++) {
+                        const tile = dungeon[y][x];
+                        const screenX = (x + offsetX) * TILE_SIZE;
+                        const screenY = (y + offsetY) * TILE_SIZE;
+
+                        if (screenX < -TILE_SIZE || screenX > CANVAS_WIDTH || screenY < -TILE_SIZE || screenY > CANVAS_HEIGHT) {
+                            continue;
+                        }
+
+                        if (tile.type === 'wall') {
+                            ctx.fillStyle = '#374151';
+                            ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
+                            ctx.strokeStyle = '#1f2937';
+                            ctx.strokeRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
+                        } else {
+                            ctx.fillStyle = '#1f2937';
+                            ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
+                            ctx.strokeStyle = '#111827';
+                            ctx.strokeRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
+                        }
+                    }
+                }
+
+                // Dessiner les entités
+                entities.forEach(entity => {
+                    const screenX = (entity.x + offsetX) * TILE_SIZE;
+                    const screenY = (entity.y + offsetY) * TILE_SIZE;
+
+                    if (screenX < -TILE_SIZE || screenX > CANVAS_WIDTH || screenY < -TILE_SIZE || screenY > CANVAS_HEIGHT) {
+                        return;
+                    }
+
+                    ctx.font = `${TILE_SIZE * 0.7}px Arial`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(entity.emoji, screenX + TILE_SIZE / 2, screenY + TILE_SIZE / 2);
+                });
+
+                // Dessiner le héros
+                const heroScreenX = (heroPos.x + offsetX) * TILE_SIZE;
+                const heroScreenY = (heroPos.y + offsetY) * TILE_SIZE;
+
+                // Ombre
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+                ctx.beginPath();
+                ctx.ellipse(heroScreenX + TILE_SIZE / 2, heroScreenY + TILE_SIZE * 0.9, TILE_SIZE * 0.3, TILE_SIZE * 0.1, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Corps du héros
+                ctx.fillStyle = '#8b5cf6';
+                ctx.beginPath();
+                ctx.arc(heroScreenX + TILE_SIZE / 2, heroScreenY + TILE_SIZE / 2, TILE_SIZE * 0.35, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Visage
+                ctx.font = `${TILE_SIZE * 0.5}px Arial`;
+                ctx.fillText('🧙', heroScreenX + TILE_SIZE / 2, heroScreenY + TILE_SIZE / 2);
+
+            }, [gameState, heroPos, dungeon, entities]);
+
+            // ==================== UI ====================
+
+            if (gameState === GAME_STATES.TITLE) {
+                return (
+                    <div className="game-container" style={{ justifyContent: 'center', alignItems: 'center' }}>
+                        <div style={{ textAlign: 'center', maxWidth: '600px', padding: '40px' }}>
+                            <h1 style={{ fontSize: '48px', color: '#8b5cf6', marginBottom: '16px', fontWeight: 'bold' }}>
+                                ⚔️ Le Donjon des Ténèbres 2D
+                            </h1>
+                            <p style={{ fontSize: '18px', color: '#9ca3af', marginBottom: '32px' }}>
+                                Explorez le donjon en temps réel !
+                            </p>
+                            <button
+                                onClick={() => setGameState(GAME_STATES.EXPLORATION)}
+                                style={{
+                                    padding: '16px 48px',
+                                    fontSize: '24px',
+                                    background: '#8b5cf6',
+                                    border: 'none',
+                                    borderRadius: '12px',
+                                    color: 'white',
+                                    fontWeight: 'bold',
+                                    cursor: 'pointer',
+                                    boxShadow: '0 8px 16px rgba(139, 92, 246, 0.4)'
+                                }}
+                                onMouseOver={(e) => e.target.style.background = '#7c3aed'}
+                                onMouseOut={(e) => e.target.style.background = '#8b5cf6'}
+                            >
+                                🎮 Nouvelle Partie
+                            </button>
+                            <div style={{ marginTop: '32px', fontSize: '14px', color: '#6b7280' }}>
+                                <p>🎮 Contrôles : Flèches ou WASD</p>
+                                <p>⚔️ Combat : Touchez un ennemi</p>
+                                <p>📦 Objets : Marchez dessus</p>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (gameState === GAME_STATES.VICTORY) {
+                return (
+                    <div className="game-container" style={{ justifyContent: 'center', alignItems: 'center' }}>
+                        <div style={{ textAlign: 'center' }}>
+                            <h1 style={{ fontSize: '64px', color: '#fbbf24', marginBottom: '24px' }}>
+                                👑 VICTOIRE ! 👑
+                            </h1>
+                            <p style={{ fontSize: '24px', color: '#fff', marginBottom: '16px' }}>
+                                Vous avez vaincu le boss !
+                            </p>
+                            <p style={{ fontSize: '18px', color: '#9ca3af' }}>
+                                Niveau final : {player.level} | Or : {player.gold}
+                            </p>
+                            <button
+                                onClick={() => {
+                                    setGameState(GAME_STATES.TITLE);
+                                    setPlayer({ ...PLAYER_BASE_STATS });
+                                    setDungeon([]);
+                                    setEntities([]);
+                                }}
+                                style={{
+                                    marginTop: '32px',
+                                    padding: '16px 48px',
+                                    fontSize: '20px',
+                                    background: '#8b5cf6',
+                                    border: 'none',
+                                    borderRadius: '12px',
+                                    color: 'white',
+                                    fontWeight: 'bold',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Retour au menu
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (gameState === GAME_STATES.GAME_OVER) {
+                return (
+                    <div className="game-container" style={{ justifyContent: 'center', alignItems: 'center' }}>
+                        <div style={{ textAlign: 'center' }}>
+                            <h1 style={{ fontSize: '64px', color: '#ef4444', marginBottom: '24px' }}>
+                                💀 GAME OVER
+                            </h1>
+                            <p style={{ fontSize: '18px', color: '#9ca3af' }}>
+                                Niveau atteint : {player.level}
+                            </p>
+                            <button
+                                onClick={() => {
+                                    setGameState(GAME_STATES.TITLE);
+                                    setPlayer({ ...PLAYER_BASE_STATS });
+                                    setDungeon([]);
+                                    setEntities([]);
+                                }}
+                                style={{
+                                    marginTop: '32px',
+                                    padding: '16px 48px',
+                                    fontSize: '20px',
+                                    background: '#8b5cf6',
+                                    border: 'none',
+                                    borderRadius: '12px',
+                                    color: 'white',
+                                    fontWeight: 'bold',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Retour au menu
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="game-container">
+                    {/* Barre de stats */}
+                    <div className="stats-bar">
+                        <div className="stat-item">
+                            <div className="stat-label">Héros - Niv. {player.level}</div>
+                            <div className="stat-bar">
+                                <div className="stat-bar-fill hp-fill" style={{ width: `${(player.currentHp / player.maxHp) * 100}%` }}></div>
+                                <div className="stat-text">HP {player.currentHp}/{player.maxHp}</div>
+                            </div>
+                            <div className="stat-bar">
+                                <div className="stat-bar-fill mp-fill" style={{ width: `${(player.currentMp / player.maxMp) * 100}%` }}></div>
+                                <div className="stat-text">MP {player.currentMp}/{player.maxMp}</div>
+                            </div>
+                        </div>
+                        <div className="stat-item">
+                            <div className="stat-label">Combat</div>
+                            <div style={{ color: '#fff', fontSize: '14px', marginTop: '4px' }}>
+                                ⚔️ ATK: {player.attack}<br/>
+                                🛡️ DEF: {player.defense}
+                            </div>
+                        </div>
+                        <div className="stat-item">
+                            <div className="stat-label">Magie</div>
+                            <div style={{ color: '#fff', fontSize: '14px', marginTop: '4px' }}>
+                                ✨ MAG: {player.magic}<br/>
+                                ⚡ SPD: {player.speed}
+                            </div>
+                        </div>
+                        <div className="stat-item">
+                            <div className="stat-label">Ressources</div>
+                            <div style={{ color: '#fff', fontSize: '14px', marginTop: '4px' }}>
+                                💰 Or: {player.gold}<br/>
+                                ⭐ XP: {player.exp}/{player.expToNextLevel}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Canvas */}
+                    <div className="canvas-container">
+                        <canvas
+                            ref={canvasRef}
+                            width={CANVAS_WIDTH}
+                            height={CANVAS_HEIGHT}
+                            style={{ border: '2px solid #8b5cf6', borderRadius: '8px' }}
+                        />
+                        <div className="controls-hint">
+                            ⌨️ Flèches ou WASD pour se déplacer • 💎 Collectez les objets • ⚔️ Combattez les ennemis
+                        </div>
+                    </div>
+
+                    {/* Combat overlay */}
+                    {gameState === GAME_STATES.COMBAT && combat && (
+                        <div className="combat-overlay">
+                            <div className="combat-panel">
+                                <div className="enemy-display">
+                                    <div className="enemy-name">{combat.enemy.name}</div>
+                                    <div className="stat-bar" style={{ maxWidth: '400px', margin: '0 auto', height: '24px' }}>
+                                        <div className="stat-bar-fill"
+                                             style={{
+                                                 background: combat.enemy.color,
+                                                 width: `${(combat.enemy.currentHp / combat.enemy.maxHp) * 100}%`
+                                             }}></div>
+                                        <div className="stat-text">HP {combat.enemy.currentHp}/{combat.enemy.maxHp}</div>
+                                    </div>
+                                </div>
+
+                                <div className="battle-log">
+                                    {battleLog.map(log => (
+                                        <div key={log.id} className={`log-entry log-${log.type}`}>
+                                            • {log.message}
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <div className="actions-grid">
+                                    <div className="action-section">
+                                        <div className="action-title">⚔️ Compétences</div>
+                                        {Object.entries(SKILLS)
+                                            .filter(([key, skill]) => !skill.level || skill.level <= player.level)
+                                            .map(([key, skill]) => (
+                                            <button
+                                                key={key}
+                                                className="skill-button"
+                                                disabled={skill.mpCost > player.currentMp}
+                                                onClick={() => playerAction({ type: 'skill', skill })}
+                                            >
+                                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                                    <span>{skill.name}</span>
+                                                    <span style={{ color: '#60a5fa' }}>{skill.mpCost} MP</span>
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+
+                                    <div className="action-section">
+                                        <div className="action-title">🎒 Objets</div>
+                                        {Object.entries(inventory)
+                                            .filter(([key, qty]) => qty > 0 && ITEMS[key].effect !== 'key')
+                                            .map(([key, qty]) => (
+                                            <button
+                                                key={key}
+                                                className="item-button"
+                                                onClick={() => playerAction({ type: 'item', itemKey: key })}
+                                            >
+                                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                                    <span>{ITEMS[key].emoji} {ITEMS[key].name}</span>
+                                                    <span>x{qty}</span>
+                                                </div>
+                                            </button>
+                                        ))}
+                                        {Object.entries(inventory).filter(([k, qty]) => qty > 0 && ITEMS[k].effect !== 'key').length === 0 && (
+                                            <div style={{ color: '#6b7280', fontSize: '14px', padding: '12px' }}>
+                                                Aucun objet
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {combat.entity.enemyType !== 'boss' && (
+                                    <button
+                                        className="flee-button"
+                                        onClick={() => playerAction({ type: 'flee' })}
+                                    >
+                                        🏃 Fuir le combat
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        ReactDOM.render(<DungeonRPG2D />, document.getElementById('root'));
+    </script>
+</body>
+</html>
