@@ -34,12 +34,64 @@
         }
         .float { animation: float 3s ease-in-out infinite; }
 
+        @keyframes movePlayer {
+            0% { transform: translateX(0) translateY(0) scale(1); }
+            50% { transform: translateX(var(--move-x)) translateY(var(--move-y)) scale(1.1); }
+            100% { transform: translateX(0) translateY(0) scale(1); }
+        }
+        .move-player { animation: movePlayer 0.5s ease-in-out; }
+
         .hp-bar { transition: width 0.5s ease-out; }
         .mp-bar { transition: width 0.5s ease-out; }
 
         body {
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
             min-height: 100vh;
+        }
+
+        /* Salles du donjon en vue isométrique */
+        .room-tile {
+            width: 80px;
+            height: 80px;
+            position: relative;
+            transition: all 0.3s ease;
+        }
+
+        .room-tile:hover {
+            transform: scale(1.05);
+            z-index: 10;
+        }
+
+        .room-tile-inner {
+            width: 100%;
+            height: 100%;
+            border: 2px solid rgba(139, 92, 246, 0.5);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .room-tile-inner::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(255,255,255,0.1), transparent);
+            pointer-events: none;
+        }
+
+        .player-marker {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 2.5rem;
+            z-index: 100;
+            filter: drop-shadow(0 0 10px rgba(255, 255, 0, 0.8));
+            animation: float 2s ease-in-out infinite;
         }
     </style>
 </head>
@@ -173,6 +225,7 @@
                 name: "Cavernes Sombres",
                 description: "Des grottes humides et sombres. Des bruits étranges résonnent dans l'obscurité.",
                 theme: "bg-gradient-to-b from-gray-800 to-gray-900",
+                color: "#6B7280",
                 enemies: ["slime", "bat", "goblin"],
                 boss: "goblinKing",
                 rooms: 6
@@ -182,6 +235,7 @@
                 name: "Cryptes Maudites",
                 description: "Des tombes anciennes et des couloirs hantés. L'air est glacial.",
                 theme: "bg-gradient-to-b from-purple-900 to-gray-900",
+                color: "#7C3AED",
                 enemies: ["skeleton", "ghost", "zombie"],
                 boss: "necromancer",
                 rooms: 7
@@ -191,6 +245,7 @@
                 name: "Égouts Infernaux",
                 description: "Des tunnels nauséabonds remplis d'eau stagnante. Des créatures rampent dans l'ombre.",
                 theme: "bg-gradient-to-b from-green-900 to-gray-900",
+                color: "#10B981",
                 enemies: ["giantRat", "toxicSlime", "crocodile"],
                 boss: "hydra",
                 rooms: 7
@@ -200,6 +255,7 @@
                 name: "Salles de Torture",
                 description: "Des chambres de souffrance où résonnent encore les échos du passé.",
                 theme: "bg-gradient-to-b from-red-900 to-gray-900",
+                color: "#EF4444",
                 enemies: ["cursedArmor", "executioner", "spectre"],
                 boss: "torturer",
                 rooms: 8
@@ -209,6 +265,7 @@
                 name: "Salle du Trône",
                 description: "Le cœur des ténèbres. Le Seigneur des Ténèbres vous attend.",
                 theme: "bg-gradient-to-b from-purple-950 to-black",
+                color: "#6D28D9",
                 enemies: ["eliteGuard", "darkMage", "deathKnight"],
                 boss: "darkLord",
                 rooms: 8
@@ -233,6 +290,7 @@
             const [dialogue, setDialogue] = useState(null);
             const [defeatedBosses, setDefeatedBosses] = useState([]);
             const [merchantInventory, setMerchantInventory] = useState(null);
+            const [roomsData, setRoomsData] = useState([]);
 
             // Initialiser le jeu
             const startNewGame = () => {
@@ -250,8 +308,44 @@
                     accessory: 'none'
                 });
                 setDefeatedBosses([]);
+                generateRoomsForFloor(0);
                 setGameState(GAME_STATES.EXPLORATION);
                 addDialogue("Bienvenue, héros. Votre quête commence maintenant. Le donjon vous attend...");
+            };
+
+            // Générer les salles pour un étage
+            const generateRoomsForFloor = (floorIndex) => {
+                const floor = FLOORS[floorIndex];
+                const rooms = [];
+
+                for (let i = 0; i < floor.rooms; i++) {
+                    if (i === floor.rooms - 1) {
+                        // Dernière salle = boss
+                        rooms.push({
+                            id: i,
+                            type: 'boss',
+                            visited: false,
+                            cleared: false
+                        });
+                    } else {
+                        // Salles aléatoires
+                        const rand = Math.random();
+                        let type;
+                        if (rand < 0.5) type = 'enemy';
+                        else if (rand < 0.7) type = 'treasure';
+                        else if (rand < 0.85) type = 'merchant';
+                        else type = 'event';
+
+                        rooms.push({
+                            id: i,
+                            type,
+                            visited: false,
+                            cleared: false
+                        });
+                    }
+                }
+
+                setRoomsData(rooms);
             };
 
             // Calculer les stats avec équipement
@@ -464,6 +558,11 @@
 
                     newLog.push({ message: `Victoire ! +${newEnemy.exp} XP, +${goldGain} Or`, type: 'success' });
 
+                    // Marquer la salle comme terminée
+                    setRoomsData(prev => prev.map((r, i) =>
+                        i === currentRoom ? { ...r, visited: true, cleared: true } : r
+                    ));
+
                     // Drop
                     if (newEnemy.drop) {
                         if (Math.random() * 100 < newEnemy.drop.chance) {
@@ -633,6 +732,12 @@
             // Exploration - actions de salle
             const exploreRoom = () => {
                 const floor = FLOORS[currentFloor];
+                const room = roomsData[currentRoom];
+
+                // Marquer la salle comme visitée
+                setRoomsData(prev => prev.map((r, i) =>
+                    i === currentRoom ? { ...r, visited: true } : r
+                ));
 
                 // Dernière salle = boss
                 if (currentRoom >= floor.rooms - 1) {
@@ -641,6 +746,7 @@
                         if (currentFloor < FLOORS.length - 1) {
                             setCurrentFloor(currentFloor + 1);
                             setCurrentRoom(0);
+                            generateRoomsForFloor(currentFloor + 1);
                             addDialogue(`Vous descendez dans ${FLOORS[currentFloor + 1].name}...`);
                         }
                     } else {
@@ -651,14 +757,13 @@
                     return;
                 }
 
-                // Salle aléatoire
-                const roomType = Math.random();
-
-                if (roomType < 0.5) {
+                // Exécuter l'action selon le type de salle
+                if (room.type === 'enemy') {
                     // Combat
                     const enemyKey = floor.enemies[Math.floor(Math.random() * floor.enemies.length)];
                     startCombat(enemyKey);
-                } else if (roomType < 0.7) {
+                    return; // BUG FIX: Ajout du return ici !
+                } else if (room.type === 'treasure') {
                     // Coffre
                     const treasureType = Math.random();
                     if (treasureType < 0.4) {
@@ -687,7 +792,10 @@
                             addDialogue(`Vous trouvez un coffre ! +${gold} Or`);
                         }
                     }
-                } else if (roomType < 0.85) {
+                    setRoomsData(prev => prev.map((r, i) =>
+                        i === currentRoom ? { ...r, cleared: true } : r
+                    ));
+                } else if (room.type === 'merchant') {
                     // Marchand
                     setMerchantInventory({
                         potion: true,
@@ -701,8 +809,11 @@
                     addDialogue("Vous rencontrez un marchand ambulant.", () => {
                         setGameState(GAME_STATES.MERCHANT);
                     });
+                    setRoomsData(prev => prev.map((r, i) =>
+                        i === currentRoom ? { ...r, cleared: true } : r
+                    ));
                 } else {
-                    // Salle vide / repos
+                    // Salle vide / repos / événement
                     const events = [
                         "Une salle vide. Vous en profitez pour vous reposer.",
                         "Des ossements jonchent le sol. Vous continuez prudemment.",
@@ -721,9 +832,20 @@
                     }
 
                     addDialogue(event);
+                    setRoomsData(prev => prev.map((r, i) =>
+                        i === currentRoom ? { ...r, cleared: true } : r
+                    ));
                 }
 
                 setCurrentRoom(currentRoom + 1);
+            };
+
+            // Se déplacer vers une salle spécifique
+            const moveToRoom = (roomIndex) => {
+                if (roomIndex > currentRoom && roomIndex <= currentRoom + 1) {
+                    setCurrentRoom(roomIndex);
+                    exploreRoom();
+                }
             };
 
             // Marchand
@@ -749,6 +871,78 @@
                 }
             };
 
+            // ==================== COMPOSANTS UI ====================
+
+            // Icône de salle selon le type
+            const getRoomIcon = (room) => {
+                if (room.type === 'boss') return '👑';
+                if (room.type === 'enemy') return '⚔️';
+                if (room.type === 'treasure') return '📦';
+                if (room.type === 'merchant') return '🛒';
+                return '🚪';
+            };
+
+            // Couleur de salle
+            const getRoomColor = (room, floor) => {
+                if (room.cleared) return 'bg-green-700';
+                if (room.visited) return 'bg-blue-700';
+                if (room.type === 'boss') return 'bg-red-800';
+                return `bg-gray-700`;
+            };
+
+            // Mini-map du donjon
+            const DungeonMap = () => {
+                const floor = FLOORS[currentFloor];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4 border-2 border-purple-500 mb-6">
+                        <h3 className="text-xl font-bold text-purple-300 mb-4 text-center">
+                            🗺️ Carte du Donjon - {floor.name}
+                        </h3>
+                        <div className="grid grid-cols-4 gap-3 max-w-2xl mx-auto">
+                            {roomsData.map((room, index) => (
+                                <div
+                                    key={index}
+                                    className="room-tile relative"
+                                    style={{ opacity: index <= currentRoom + 1 ? 1 : 0.3 }}
+                                >
+                                    <div
+                                        className={`room-tile-inner ${getRoomColor(room, floor)}`}
+                                        style={{
+                                            boxShadow: index === currentRoom ? `0 0 20px ${floor.color}` : 'none'
+                                        }}
+                                    >
+                                        <span className="text-3xl">
+                                            {index === currentRoom ? '🧙' : getRoomIcon(room)}
+                                        </span>
+                                        {room.cleared && index !== currentRoom && (
+                                            <div className="absolute top-1 right-1 text-green-400 text-sm">✓</div>
+                                        )}
+                                    </div>
+                                    <div className="text-center text-xs text-gray-400 mt-1">
+                                        Salle {index + 1}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="mt-4 text-sm text-gray-400 text-center space-y-1">
+                            <div>🧙 Position actuelle | ⚔️ Combat | 📦 Coffre | 🛒 Marchand | 👑 Boss</div>
+                            <div className="flex items-center justify-center gap-4 mt-2">
+                                <span className="flex items-center gap-1">
+                                    <div className="w-4 h-4 bg-gray-700 rounded"></div> Non visité
+                                </span>
+                                <span className="flex items-center gap-1">
+                                    <div className="w-4 h-4 bg-blue-700 rounded"></div> Visité
+                                </span>
+                                <span className="flex items-center gap-1">
+                                    <div className="w-4 h-4 bg-green-700 rounded"></div> Terminé
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
             // ==================== RENDU ====================
 
             if (gameState === GAME_STATES.TITLE_SCREEN) {
@@ -758,7 +952,7 @@
                             <h1 className="text-6xl font-bold text-purple-300 mb-4 float animate-pulse">
                                 ⚔️ Le Donjon des Ténèbres ⚔️
                             </h1>
-                            <p className="text-xl text-gray-400 mb-8">Un RPG tour par tour épique</p>
+                            <p className="text-xl text-gray-400 mb-8">Un RPG tour par tour épique avec exploration 2D</p>
                             <div className="space-y-4">
                                 <button
                                     onClick={startNewGame}
@@ -767,9 +961,8 @@
                                     🎮 Nouvelle Partie
                                 </button>
                                 <div className="text-gray-500 text-sm mt-8">
-                                    <p>Explorez 5 étages de donjon</p>
-                                    <p>Combattez des monstres et des boss</p>
-                                    <p>Montez en niveau et trouvez des équipements</p>
+                                    <p>✨ Nouvelle version avec visualisation 2D du donjon !</p>
+                                    <p>Explorez 5 étages • Combattez des boss • Progressez</p>
                                 </div>
                             </div>
                         </div>
@@ -953,7 +1146,7 @@
                 return (
                     <div className={`min-h-screen ${floor.theme}`}>
                         <StatsBar />
-                        <div className="max-w-6xl mx-auto p-6">
+                        <div className="max-w-7xl mx-auto p-6">
                             <div className="bg-gray-800 rounded-lg p-6 mb-6 border-2 border-purple-500 fade-in">
                                 <h2 className="text-3xl font-bold text-purple-300 mb-2">
                                     {floor.name} - Étage {currentFloor + 1}
@@ -966,6 +1159,9 @@
                                     )}
                                 </div>
                             </div>
+
+                            {/* Mini-map du donjon */}
+                            <DungeonMap />
 
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <button
@@ -987,6 +1183,7 @@
                                         onClick={() => {
                                             setCurrentFloor(currentFloor + 1);
                                             setCurrentRoom(0);
+                                            generateRoomsForFloor(currentFloor + 1);
                                             addDialogue(`Vous descendez dans ${FLOORS[currentFloor + 1].name}...`);
                                         }}
                                         className="bg-green-600 hover:bg-green-700 text-white font-bold py-8 px-6 rounded-lg text-xl transition-all transform hover:scale-105"
