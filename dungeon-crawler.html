@@ -1,0 +1,1441 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Les Donjons Maudits - Dungeon Crawler RPG</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=MedievalSharp&family=Cinzel:wght@400;700&display=swap');
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Cinzel', serif;
+            background: #000;
+        }
+
+        .medieval-font {
+            font-family: 'MedievalSharp', cursive;
+        }
+
+        canvas {
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+        }
+
+        .stat-bar {
+            transition: width 0.3s ease;
+        }
+
+        .glow {
+            text-shadow: 0 0 10px currentColor;
+        }
+
+        .damage-flash {
+            animation: flash 0.3s;
+        }
+
+        @keyframes flash {
+            0%, 100% { opacity: 0; }
+            50% { opacity: 1; }
+        }
+
+        .tooltip {
+            pointer-events: none;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // ==================== CONSTANTES ====================
+
+        const TILE_TYPES = {
+            VOID: 0,
+            FLOOR: 1,
+            WALL: 2,
+            DOOR: 3,
+            DOOR_OPEN: 4,
+            SECRET_WALL: 5,
+            STAIRS_DOWN: 6,
+            STAIRS_UP: 7,
+            WATER: 8,
+            LAVA: 9,
+        };
+
+        const RAYCASTING_CONFIG = {
+            fov: 60,
+            rayCount: 120,
+            maxRenderDistance: 16,
+            screenWidth: 800,
+            screenHeight: 500,
+        };
+
+        const RACES = {
+            human: {
+                name: 'Humain',
+                bonusStats: { str: 2, end: 2, agi: 2, int: 2, wis: 2, per: 2 },
+                passive: 'Apprentissage rapide (+10% XP)',
+                xpBonus: 1.1,
+            },
+            elf: {
+                name: 'Elfe',
+                bonusStats: { str: 0, end: 0, agi: 2, int: 4, wis: 2, per: 0 },
+                passive: 'Mana +20%, Vision dans le noir',
+                manaBonus: 1.2,
+                nightVision: true,
+            },
+            dwarf: {
+                name: 'Nain',
+                bonusStats: { str: 4, end: 2, agi: 0, int: -2, wis: 0, per: 0 },
+                passive: 'Résistance poison, Détection trésors',
+                poisonResist: 0.5,
+                treasureDetection: true,
+            },
+            orc: {
+                name: 'Orc',
+                bonusStats: { str: 6, end: 2, agi: 0, int: -2, wis: -2, per: 0 },
+                passive: 'Rage (dégâts +50% si HP < 25%)',
+                rageBonus: 1.5,
+            },
+        };
+
+        const CLASSES = {
+            warrior: {
+                name: 'Guerrier',
+                mainStats: ['str', 'end'],
+                hpBonus: 20,
+                manaBonus: 0,
+                skills: ['powerStrike', 'block'],
+            },
+            mage: {
+                name: 'Mage',
+                mainStats: ['int', 'wis'],
+                hpBonus: 0,
+                manaBonus: 30,
+                skills: ['fireball', 'magicShield'],
+            },
+            rogue: {
+                name: 'Voleur',
+                mainStats: ['agi', 'per'],
+                hpBonus: 10,
+                manaBonus: 10,
+                skills: ['lockpick', 'backstab'],
+            },
+            paladin: {
+                name: 'Paladin',
+                mainStats: ['str', 'wis'],
+                hpBonus: 15,
+                manaBonus: 15,
+                skills: ['minorHeal', 'holyStrike'],
+            },
+        };
+
+        const SPELLS = {
+            // Destruction
+            spark: { name: 'Étincelle', school: 'destruction', level: 1, manaCost: 5, damage: 10, element: 'lightning' },
+            fireball: { name: 'Boule de feu', school: 'destruction', level: 3, manaCost: 15, damage: 25, element: 'fire', effect: 'burn' },
+            frostCone: { name: 'Cône de givre', school: 'destruction', level: 5, manaCost: 20, damage: 20, element: 'ice', effect: 'slow' },
+            lightningStorm: { name: 'Tempête de foudre', school: 'destruction', level: 8, manaCost: 40, damage: 50, element: 'lightning', aoe: true },
+
+            // Restauration
+            minorHeal: { name: 'Soin mineur', school: 'restoration', level: 1, manaCost: 8, healing: 20 },
+            sacredShield: { name: 'Bouclier sacré', school: 'restoration', level: 2, manaCost: 12, buff: 'armor', duration: 30, value: 0.3 },
+            majorHeal: { name: 'Soin majeur', school: 'restoration', level: 5, manaCost: 25, healing: 50 },
+            resurrection: { name: 'Résurrection', school: 'restoration', level: 10, manaCost: 80, autoRevive: true },
+
+            // Altération
+            stoneSkin: { name: 'Peau de pierre', school: 'alteration', level: 2, manaCost: 10, buff: 'armor', duration: 20, value: 20 },
+            haste: { name: 'Hâte', school: 'alteration', level: 4, manaCost: 18, buff: 'speed', duration: 15, value: 0.3 },
+            paralyze: { name: 'Paralysie', school: 'alteration', level: 6, manaCost: 30, debuff: 'stun', duration: 5 },
+
+            // Illusion
+            light: { name: 'Lumière', school: 'illusion', level: 1, manaCost: 3, buff: 'light', duration: 60 },
+            invisibility: { name: 'Invisibilité', school: 'illusion', level: 4, manaCost: 20, buff: 'invisible', duration: 10 },
+            confusion: { name: 'Confusion', school: 'illusion', level: 5, manaCost: 25, debuff: 'confused', duration: 10 },
+        };
+
+        const WEAPONS = {
+            fist: { name: 'Poings', damage: [1, 3], speed: 0.8, rarity: 'common' },
+            rustyDagger: { name: 'Dague rouillée', damage: [3, 6], speed: 0.6, rarity: 'common', value: 10 },
+            ironSword: { name: 'Épée de fer', damage: [8, 14], speed: 1.0, rarity: 'common', value: 50 },
+            warAxe: { name: 'Hache de guerre', damage: [15, 25], speed: 1.4, rarity: 'uncommon', value: 120 },
+            silverBlade: { name: 'Lame d\'argent', damage: [12, 18], speed: 0.9, rarity: 'uncommon', value: 200, special: 'undead' },
+            longbow: { name: 'Arc long', damage: [10, 16], speed: 1.5, rarity: 'uncommon', value: 150, range: 8 },
+            fireStaff: { name: 'Bâton de feu', damage: [5, 8], speed: 2.0, rarity: 'rare', value: 300, magicBonus: { fire: 0.25 } },
+            excalibur: { name: 'Excalibur', damage: [25, 40], speed: 1.0, rarity: 'legendary', value: 10000, stats: { str: 10, end: 10, agi: 10, int: 10, wis: 10, per: 10 }, light: true },
+        };
+
+        const ARMOR = {
+            noviceRobe: { name: 'Robe de novice', slot: 'chest', armor: 2, rarity: 'common', value: 15, manaBonus: 5 },
+            chainmail: { name: 'Cotte de mailles', slot: 'chest', armor: 12, rarity: 'common', value: 80 },
+            plateMail: { name: 'Plastron de plates', slot: 'chest', armor: 20, rarity: 'uncommon', value: 200, agiPenalty: -1 },
+            dragonArmor: { name: 'Armure du dragon', slot: 'chest', armor: 28, rarity: 'rare', value: 1000, fireResist: 0.3 },
+            ironHelm: { name: 'Casque de fer', slot: 'head', armor: 5, rarity: 'common', value: 40 },
+            championHelm: { name: 'Heaume du champion', slot: 'head', armor: 12, rarity: 'rare', value: 300, critBonus: 5 },
+        };
+
+        const CONSUMABLES = {
+            healthPotion: { name: 'Potion de soin', type: 'potion', effect: 'heal', value: 50, worth: 25 },
+            manaPotion: { name: 'Potion de mana', type: 'potion', effect: 'mana', value: 30, worth: 30 },
+            majorHealthPotion: { name: 'Potion de soin majeure', type: 'potion', effect: 'heal', value: 150, worth: 100 },
+            antidote: { name: 'Antidote', type: 'potion', effect: 'curePoison', worth: 15 },
+            ration: { name: 'Ration', type: 'food', effect: 'restoreHunger', worth: 5 },
+            torch: { name: 'Torche', type: 'tool', effect: 'light', duration: 300, worth: 3 },
+            teleportScroll: { name: 'Parchemin de téléportation', type: 'scroll', effect: 'teleport', worth: 200 },
+            skeletonKey: { name: 'Clé squelette', type: 'key', effect: 'openDoor', worth: 50 },
+        };
+
+        const DUNGEONS = [
+            {
+                id: 1,
+                name: 'Les Caves Oubliées',
+                recommendedLevel: [1, 3],
+                theme: 'cave',
+                enemyTypes: ['rat', 'slime', 'goblin', 'spider'],
+                boss: {
+                    name: 'Reine Araignée',
+                    hp: 200,
+                    damage: [15, 25],
+                    special: 'web',
+                    sprite: '🕷️',
+                },
+                reward: { fragment: 1, items: ['ironSword', 'protectionRing'] },
+            },
+            {
+                id: 2,
+                name: 'Les Cryptes Ancestrales',
+                recommendedLevel: [4, 6],
+                theme: 'crypt',
+                enemyTypes: ['skeleton', 'zombie', 'ghost', 'ghoul'],
+                boss: {
+                    name: 'Liche Ancienne',
+                    hp: 350,
+                    damage: [20, 35],
+                    special: 'summon',
+                    sprite: '☠️',
+                },
+                reward: { fragment: 2, items: ['necroStaff', 'undeadAmulet'] },
+            },
+            {
+                id: 3,
+                name: 'Le Temple Englouti',
+                recommendedLevel: [7, 9],
+                theme: 'water',
+                enemyTypes: ['fishman', 'siren', 'crab', 'waterElemental'],
+                boss: {
+                    name: 'Léviathan',
+                    hp: 500,
+                    damage: [25, 40],
+                    special: 'regeneration',
+                    sprite: '🐋',
+                },
+                reward: { fragment: 3, items: ['trident', 'waterWalkBoots'] },
+            },
+            {
+                id: 4,
+                name: 'La Forteresse de Cendres',
+                recommendedLevel: [10, 12],
+                theme: 'fire',
+                enemyTypes: ['fireElemental', 'demon', 'lavaGolem', 'salamander'],
+                boss: {
+                    name: 'Seigneur de la Forge',
+                    hp: 700,
+                    damage: [30, 50],
+                    special: 'forgeWeapon',
+                    sprite: '🔥',
+                },
+                reward: { fragment: 4, items: ['flameBlade', 'magmaArmor'] },
+            },
+            {
+                id: 5,
+                name: 'Le Sanctuaire du Néant',
+                recommendedLevel: [13, 15],
+                theme: 'void',
+                enemyTypes: ['shadow', 'devourer', 'aberration', 'voidKnight'],
+                boss: {
+                    name: 'L\'Entité du Néant',
+                    hp: 1000,
+                    damage: [40, 70],
+                    special: 'threephases',
+                    sprite: '👁️',
+                },
+                reward: { fragment: 5, items: ['legendaryArtifact'] },
+            },
+        ];
+
+        const ENEMY_TYPES = {
+            // Donjon 1
+            rat: { name: 'Rat géant', hp: 15, damage: [2, 5], xp: 10, sprite: '🐀', speed: 1.2 },
+            slime: { name: 'Slime', hp: 20, damage: [3, 6], xp: 15, sprite: '🟢', speed: 0.5 },
+            goblin: { name: 'Gobelin', hp: 30, damage: [5, 10], xp: 25, sprite: '👺', speed: 1.0 },
+            spider: { name: 'Araignée', hp: 25, damage: [4, 8], xp: 20, sprite: '🕷️', speed: 1.1, poison: true },
+
+            // Donjon 2
+            skeleton: { name: 'Squelette', hp: 40, damage: [8, 15], xp: 40, sprite: '💀', speed: 0.9 },
+            zombie: { name: 'Zombie', hp: 60, damage: [10, 18], xp: 50, sprite: '🧟', speed: 0.6 },
+            ghost: { name: 'Fantôme', hp: 35, damage: [12, 20], xp: 60, sprite: '👻', speed: 1.3, ethereal: true },
+            ghoul: { name: 'Goule', hp: 50, damage: [15, 25], xp: 70, sprite: '🧛', speed: 1.0, lifesteal: 0.3 },
+
+            // Donjon 3
+            fishman: { name: 'Homme-poisson', hp: 70, damage: [15, 25], xp: 80, sprite: '🐟', speed: 1.2 },
+            siren: { name: 'Sirène', hp: 60, damage: [18, 28], xp: 90, sprite: '🧜', speed: 1.0, charm: true },
+            crab: { name: 'Crabe géant', hp: 100, damage: [20, 30], xp: 100, sprite: '🦀', speed: 0.7, armor: 10 },
+            waterElemental: { name: 'Élémentaire d\'eau', hp: 80, damage: [22, 35], xp: 120, sprite: '💧', speed: 1.1 },
+
+            // Donjon 4
+            fireElemental: { name: 'Élémentaire de feu', hp: 90, damage: [25, 40], xp: 150, sprite: '🔥', speed: 1.2, fireImmune: true },
+            demon: { name: 'Démon mineur', hp: 120, damage: [30, 45], xp: 180, sprite: '😈', speed: 1.1 },
+            lavaGolem: { name: 'Golem de lave', hp: 200, damage: [35, 50], xp: 200, sprite: '🗿', speed: 0.5, armor: 20 },
+            salamander: { name: 'Salamandre', hp: 100, damage: [28, 42], xp: 160, sprite: '🦎', speed: 1.3 },
+
+            // Donjon 5
+            shadow: { name: 'Ombre', hp: 80, damage: [30, 50], xp: 220, sprite: '🌑', speed: 1.5, ethereal: true },
+            devourer: { name: 'Dévoreur', hp: 150, damage: [35, 55], xp: 250, sprite: '👹', speed: 1.0, lifesteal: 0.5 },
+            aberration: { name: 'Aberration', hp: 120, damage: [40, 60], xp: 280, sprite: '🦑', speed: 1.2, confusion: true },
+            voidKnight: { name: 'Chevalier du Vide', hp: 180, damage: [45, 70], xp: 300, sprite: '⚔️', speed: 1.0, armor: 25 },
+        };
+
+        // ==================== UTILITAIRES ====================
+
+        function calculateDerivedStats(attributes, level, playerClass, race) {
+            const classData = CLASSES[playerClass];
+            const raceData = RACES[race];
+
+            const maxHp = 50 + (attributes.end * 5) + (level * 10) + classData.hpBonus;
+            const maxMana = (20 + (attributes.int * 3) + (level * 5) + classData.manaBonus) * (raceData.manaBonus || 1);
+
+            return {
+                maxHp: Math.floor(maxHp),
+                maxMana: Math.floor(maxMana),
+                meleeDamage: 5 + Math.floor(attributes.str / 2),
+                magicPower: 5 + Math.floor(attributes.int / 2),
+                armor: Math.floor(attributes.end / 3),
+                dodge: attributes.agi * 2,
+                critChance: 5 + attributes.per,
+                critDamage: 150 + attributes.per * 2,
+                carryCapacity: 50 + attributes.str * 5,
+                trapDetection: attributes.per * 3,
+                secretDetection: attributes.per * 2,
+            };
+        }
+
+        function physicalAttack(attacker, defender, weapon) {
+            const dodgeRoll = Math.random() * 100;
+            if (dodgeRoll < defender.dodge) {
+                return { hit: false, message: 'Esquivé!' };
+            }
+
+            const weaponData = WEAPONS[weapon] || WEAPONS.fist;
+            let damage = attacker.meleeDamage + (weaponData.damage[0] + Math.random() * (weaponData.damage[1] - weaponData.damage[0]));
+
+            damage *= (0.8 + Math.random() * 0.4);
+
+            const critRoll = Math.random() * 100;
+            const isCritical = critRoll < attacker.critChance;
+            if (isCritical) damage *= (attacker.critDamage / 100);
+
+            const reduction = defender.armor / (defender.armor + 50);
+            damage *= (1 - reduction);
+
+            return {
+                hit: true,
+                damage: Math.max(1, Math.floor(damage)),
+                critical: isCritical,
+            };
+        }
+
+        function magicAttack(caster, target, spell) {
+            const spellData = SPELLS[spell];
+            if (!spellData) return { success: false, reason: 'Sort inconnu' };
+            if (caster.currentMana < spellData.manaCost) return { success: false, reason: 'Pas assez de mana' };
+
+            let damage = 0;
+            let healing = 0;
+
+            if (spellData.damage) {
+                damage = caster.magicPower + spellData.damage;
+                const magicResist = target.wis / (target.wis + 30);
+                damage *= (1 - magicResist * 0.5);
+            }
+
+            if (spellData.healing) {
+                healing = spellData.healing + caster.wis;
+            }
+
+            return {
+                success: true,
+                damage: Math.floor(damage),
+                healing: Math.floor(healing),
+                effect: spellData.effect || spellData.buff || spellData.debuff,
+                manaCost: spellData.manaCost,
+            };
+        }
+
+        // ==================== GÉNÉRATION DE DONJON ====================
+
+        class DungeonGenerator {
+            constructor(width, height, config) {
+                this.width = width;
+                this.height = height;
+                this.config = config;
+                this.grid = Array(height).fill().map(() => Array(width).fill(TILE_TYPES.VOID));
+                this.rooms = [];
+            }
+
+            generate() {
+                this.createRooms();
+                this.connectRooms();
+                this.placeStairs();
+                this.placeEntities();
+                return {
+                    grid: this.grid,
+                    rooms: this.rooms,
+                    spawn: this.rooms[0] ? this.rooms[0].center : { x: 5, y: 5 },
+                };
+            }
+
+            createRooms() {
+                const attempts = 50;
+                const minSize = 4;
+                const maxSize = 10;
+
+                for (let i = 0; i < attempts && this.rooms.length < 8; i++) {
+                    const w = minSize + Math.floor(Math.random() * (maxSize - minSize));
+                    const h = minSize + Math.floor(Math.random() * (maxSize - minSize));
+                    const x = 2 + Math.floor(Math.random() * (this.width - w - 4));
+                    const y = 2 + Math.floor(Math.random() * (this.height - h - 4));
+
+                    const newRoom = { x, y, w, h, center: { x: x + Math.floor(w/2), y: y + Math.floor(h/2) } };
+
+                    let overlaps = false;
+                    for (const room of this.rooms) {
+                        if (this.roomsOverlap(newRoom, room)) {
+                            overlaps = true;
+                            break;
+                        }
+                    }
+
+                    if (!overlaps) {
+                        this.carveRoom(newRoom);
+                        this.rooms.push(newRoom);
+                    }
+                }
+            }
+
+            roomsOverlap(room1, room2) {
+                return !(room1.x + room1.w + 1 < room2.x ||
+                        room2.x + room2.w + 1 < room1.x ||
+                        room1.y + room1.h + 1 < room2.y ||
+                        room2.y + room2.h + 1 < room1.y);
+            }
+
+            carveRoom(room) {
+                for (let y = room.y; y < room.y + room.h; y++) {
+                    for (let x = room.x; x < room.x + room.w; x++) {
+                        if (x >= 0 && x < this.width && y >= 0 && y < this.height) {
+                            this.grid[y][x] = TILE_TYPES.FLOOR;
+                        }
+                    }
+                }
+            }
+
+            connectRooms() {
+                for (let i = 0; i < this.rooms.length - 1; i++) {
+                    const roomA = this.rooms[i];
+                    const roomB = this.rooms[i + 1];
+                    this.carveCorridor(roomA.center, roomB.center);
+                }
+            }
+
+            carveCorridor(start, end) {
+                let x = start.x;
+                let y = start.y;
+
+                while (x !== end.x) {
+                    if (x >= 0 && x < this.width && y >= 0 && y < this.height) {
+                        if (this.grid[y][x] === TILE_TYPES.VOID) {
+                            this.grid[y][x] = TILE_TYPES.FLOOR;
+                        }
+                    }
+                    x += x < end.x ? 1 : -1;
+                }
+
+                while (y !== end.y) {
+                    if (x >= 0 && x < this.width && y >= 0 && y < this.height) {
+                        if (this.grid[y][x] === TILE_TYPES.VOID) {
+                            this.grid[y][x] = TILE_TYPES.FLOOR;
+                        }
+                    }
+                    y += y < end.y ? 1 : -1;
+                }
+            }
+
+            placeStairs() {
+                if (this.rooms.length > 0) {
+                    const lastRoom = this.rooms[this.rooms.length - 1];
+                    this.grid[lastRoom.center.y][lastRoom.center.x] = TILE_TYPES.STAIRS_DOWN;
+                }
+            }
+
+            placeEntities() {
+                // Sera utilisé pour placer ennemis, objets, etc.
+            }
+        }
+
+        // ==================== MOTEUR RAYCASTING ====================
+
+        class RaycastEngine {
+            constructor(canvas, config) {
+                this.canvas = canvas;
+                this.ctx = canvas.getContext('2d');
+                this.config = config;
+                this.canvas.width = config.screenWidth;
+                this.canvas.height = config.screenHeight;
+            }
+
+            render(player, dungeon, entities) {
+                this.ctx.fillStyle = '#1a1a2e';
+                this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+                this.drawFloor();
+                this.drawCeiling();
+                this.castRays(player, dungeon);
+                this.drawEntities(player, entities);
+            }
+
+            drawFloor() {
+                const gradient = this.ctx.createLinearGradient(0, this.canvas.height / 2, 0, this.canvas.height);
+                gradient.addColorStop(0, '#2a2a3e');
+                gradient.addColorStop(1, '#1a1a2e');
+                this.ctx.fillStyle = gradient;
+                this.ctx.fillRect(0, this.canvas.height / 2, this.canvas.width, this.canvas.height / 2);
+            }
+
+            drawCeiling() {
+                const gradient = this.ctx.createLinearGradient(0, 0, 0, this.canvas.height / 2);
+                gradient.addColorStop(0, '#0a0a1e');
+                gradient.addColorStop(1, '#1a1a2e');
+                this.ctx.fillStyle = gradient;
+                this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height / 2);
+            }
+
+            castRays(player, dungeon) {
+                const fovRad = (this.config.fov * Math.PI) / 180;
+                const angleStep = fovRad / this.config.rayCount;
+                const columnWidth = this.canvas.width / this.config.rayCount;
+
+                for (let i = 0; i < this.config.rayCount; i++) {
+                    const rayAngle = player.angle - fovRad / 2 + angleStep * i;
+                    const ray = this.castRay(player.x, player.y, rayAngle, dungeon);
+
+                    if (ray.hit) {
+                        const correctedDistance = ray.distance * Math.cos(rayAngle - player.angle);
+                        const wallHeight = (this.canvas.height / correctedDistance) * 2;
+
+                        const brightness = Math.max(0, 1 - ray.distance / this.config.maxRenderDistance);
+                        const color = this.getWallColor(ray.tileType, brightness);
+
+                        this.ctx.fillStyle = color;
+                        this.ctx.fillRect(
+                            i * columnWidth,
+                            (this.canvas.height - wallHeight) / 2,
+                            columnWidth + 1,
+                            wallHeight
+                        );
+                    }
+                }
+            }
+
+            castRay(startX, startY, angle, dungeon) {
+                const dirX = Math.cos(angle);
+                const dirY = Math.sin(angle);
+                const deltaDistX = Math.abs(1 / dirX);
+                const deltaDistY = Math.abs(1 / dirY);
+
+                let mapX = Math.floor(startX);
+                let mapY = Math.floor(startY);
+
+                let stepX = dirX > 0 ? 1 : -1;
+                let stepY = dirY > 0 ? 1 : -1;
+
+                let sideDistX = dirX > 0 ? (mapX + 1 - startX) * deltaDistX : (startX - mapX) * deltaDistX;
+                let sideDistY = dirY > 0 ? (mapY + 1 - startY) * deltaDistY : (startY - mapY) * deltaDistY;
+
+                let hit = false;
+                let side;
+                let distance = 0;
+                let tileType = TILE_TYPES.VOID;
+
+                for (let i = 0; i < this.config.maxRenderDistance * 2; i++) {
+                    if (sideDistX < sideDistY) {
+                        sideDistX += deltaDistX;
+                        mapX += stepX;
+                        side = 0;
+                        distance = sideDistX - deltaDistX;
+                    } else {
+                        sideDistY += deltaDistY;
+                        mapY += stepY;
+                        side = 1;
+                        distance = sideDistY - deltaDistY;
+                    }
+
+                    if (mapX < 0 || mapX >= dungeon.grid[0].length || mapY < 0 || mapY >= dungeon.grid.length) {
+                        break;
+                    }
+
+                    tileType = dungeon.grid[mapY][mapX];
+
+                    if (tileType === TILE_TYPES.WALL || tileType === TILE_TYPES.DOOR) {
+                        hit = true;
+                        break;
+                    }
+                }
+
+                return { hit, distance, side, tileType };
+            }
+
+            getWallColor(tileType, brightness) {
+                let baseColor;
+
+                switch (tileType) {
+                    case TILE_TYPES.WALL:
+                        baseColor = [100, 100, 120];
+                        break;
+                    case TILE_TYPES.DOOR:
+                        baseColor = [139, 69, 19];
+                        break;
+                    default:
+                        baseColor = [80, 80, 80];
+                }
+
+                const r = Math.floor(baseColor[0] * brightness);
+                const g = Math.floor(baseColor[1] * brightness);
+                const b = Math.floor(baseColor[2] * brightness);
+
+                return `rgb(${r}, ${g}, ${b})`;
+            }
+
+            drawEntities(player, entities) {
+                const sortedEntities = entities
+                    .map(entity => ({
+                        ...entity,
+                        distance: Math.hypot(entity.x - player.x, entity.y - player.y),
+                        angle: Math.atan2(entity.y - player.y, entity.x - player.x),
+                    }))
+                    .filter(e => e.distance < this.config.maxRenderDistance)
+                    .sort((a, b) => b.distance - a.distance);
+
+                for (const entity of sortedEntities) {
+                    let relativeAngle = entity.angle - player.angle;
+
+                    while (relativeAngle > Math.PI) relativeAngle -= 2 * Math.PI;
+                    while (relativeAngle < -Math.PI) relativeAngle += 2 * Math.PI;
+
+                    const fovRad = (this.config.fov * Math.PI) / 180;
+                    if (Math.abs(relativeAngle) > fovRad / 2) continue;
+
+                    const screenX = (0.5 + relativeAngle / fovRad) * this.canvas.width;
+                    const spriteSize = (this.canvas.height / entity.distance) * 0.5;
+                    const brightness = Math.max(0, 1 - entity.distance / this.config.maxRenderDistance);
+
+                    this.ctx.font = `${spriteSize}px Arial`;
+                    this.ctx.textAlign = 'center';
+                    this.ctx.textBaseline = 'middle';
+                    this.ctx.globalAlpha = brightness;
+                    this.ctx.fillText(entity.sprite || '👾', screenX, this.canvas.height / 2);
+                    this.ctx.globalAlpha = 1;
+                }
+            }
+        }
+
+        // ==================== COMPOSANT PRINCIPAL ====================
+
+        function DungeonCrawler() {
+            const [gameState, setGameState] = useState('menu'); // menu, charCreation, playing, paused, gameOver, victory
+            const [character, setCharacter] = useState(null);
+            const [currentDungeon, setCurrentDungeon] = useState(0);
+            const [currentLevel, setCurrentLevel] = useState(0);
+            const [dungeon, setDungeon] = useState(null);
+            const [player, setPlayer] = useState(null);
+            const [entities, setEntities] = useState([]);
+            const [inventory, setInventory] = useState([]);
+            const [equipment, setEquipment] = useState({});
+            const [combat, setCombat] = useState(null);
+            const [messages, setMessages] = useState([]);
+            const [keysPressed, setKeysPressed] = useState({});
+
+            const canvasRef = useRef(null);
+            const engineRef = useRef(null);
+            const lastUpdateRef = useRef(Date.now());
+            const attackCooldownRef = useRef(0);
+
+            // Initialisation du moteur de rendu
+            useEffect(() => {
+                if (canvasRef.current && gameState === 'playing') {
+                    engineRef.current = new RaycastEngine(canvasRef.current, RAYCASTING_CONFIG);
+                }
+            }, [gameState]);
+
+            // Boucle de jeu
+            useEffect(() => {
+                if (gameState !== 'playing') return;
+
+                const gameLoop = () => {
+                    const now = Date.now();
+                    const deltaTime = (now - lastUpdateRef.current) / 1000;
+                    lastUpdateRef.current = now;
+
+                    updateGame(deltaTime);
+                    renderGame();
+
+                    requestAnimationFrame(gameLoop);
+                };
+
+                const animationId = requestAnimationFrame(gameLoop);
+                return () => cancelAnimationFrame(animationId);
+            }, [gameState, player, entities, dungeon]);
+
+            // Gestion des touches
+            useEffect(() => {
+                const handleKeyDown = (e) => {
+                    setKeysPressed(prev => ({ ...prev, [e.key]: true }));
+
+                    if (e.key === 'Escape') {
+                        setGameState(prev => prev === 'playing' ? 'paused' : 'playing');
+                    }
+
+                    if (gameState === 'playing' && e.key === ' ') {
+                        performAttack();
+                    }
+
+                    if (gameState === 'playing' && e.key >= '1' && e.key <= '9') {
+                        useQuickSlot(parseInt(e.key) - 1);
+                    }
+                };
+
+                const handleKeyUp = (e) => {
+                    setKeysPressed(prev => ({ ...prev, [e.key]: false }));
+                };
+
+                window.addEventListener('keydown', handleKeyDown);
+                window.addEventListener('keyup', handleKeyUp);
+
+                return () => {
+                    window.removeEventListener('keydown', handleKeyDown);
+                    window.removeEventListener('keyup', handleKeyUp);
+                };
+            }, [gameState, player, combat]);
+
+            const updateGame = (deltaTime) => {
+                if (!player || !dungeon) return;
+
+                // Mise à jour du cooldown d'attaque
+                if (attackCooldownRef.current > 0) {
+                    attackCooldownRef.current -= deltaTime;
+                }
+
+                // Déplacement du joueur
+                const moveSpeed = 3 * deltaTime;
+                const rotateSpeed = 2 * deltaTime;
+
+                let newX = player.x;
+                let newY = player.y;
+                let newAngle = player.angle;
+
+                if (keysPressed['ArrowLeft'] || keysPressed['q'] || keysPressed['Q']) {
+                    newAngle -= rotateSpeed;
+                }
+                if (keysPressed['ArrowRight'] || keysPressed['d'] || keysPressed['D']) {
+                    newAngle += rotateSpeed;
+                }
+
+                if (keysPressed['ArrowUp'] || keysPressed['z'] || keysPressed['Z'] || keysPressed['w'] || keysPressed['W']) {
+                    newX += Math.cos(player.angle) * moveSpeed;
+                    newY += Math.sin(player.angle) * moveSpeed;
+                }
+                if (keysPressed['ArrowDown'] || keysPressed['s'] || keysPressed['S']) {
+                    newX -= Math.cos(player.angle) * moveSpeed;
+                    newY -= Math.sin(player.angle) * moveSpeed;
+                }
+
+                // Collision
+                const mapX = Math.floor(newX);
+                const mapY = Math.floor(newY);
+
+                if (mapX >= 0 && mapX < dungeon.grid[0].length &&
+                    mapY >= 0 && mapY < dungeon.grid.length &&
+                    dungeon.grid[mapY][mapX] === TILE_TYPES.FLOOR) {
+                    setPlayer(prev => ({ ...prev, x: newX, y: newY, angle: newAngle }));
+                } else {
+                    setPlayer(prev => ({ ...prev, angle: newAngle }));
+                }
+
+                // Mise à jour des ennemis
+                updateEntities(deltaTime);
+
+                // Vérifier si on marche sur les escaliers
+                if (dungeon.grid[Math.floor(player.y)][Math.floor(player.x)] === TILE_TYPES.STAIRS_DOWN) {
+                    nextLevel();
+                }
+            };
+
+            const updateEntities = (deltaTime) => {
+                setEntities(prevEntities => {
+                    return prevEntities.map(entity => {
+                        if (!entity.active || entity.hp <= 0) return entity;
+
+                        const dx = player.x - entity.x;
+                        const dy = player.y - entity.y;
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+
+                        // Si proche du joueur, attaquer
+                        if (distance < 1.5) {
+                            if (!entity.lastAttack || Date.now() - entity.lastAttack > 1500) {
+                                enemyAttack(entity);
+                                return { ...entity, lastAttack: Date.now() };
+                            }
+                        }
+
+                        // Sinon, se déplacer vers le joueur
+                        if (distance > 1.5 && distance < 10) {
+                            const moveSpeed = (entity.speed || 1) * deltaTime;
+                            const newX = entity.x + (dx / distance) * moveSpeed;
+                            const newY = entity.y + (dy / distance) * moveSpeed;
+
+                            const mapX = Math.floor(newX);
+                            const mapY = Math.floor(newY);
+
+                            if (dungeon.grid[mapY] && dungeon.grid[mapY][mapX] === TILE_TYPES.FLOOR) {
+                                return { ...entity, x: newX, y: newY };
+                            }
+                        }
+
+                        return entity;
+                    });
+                });
+            };
+
+            const enemyAttack = (enemy) => {
+                const enemyType = ENEMY_TYPES[enemy.type];
+                const damage = enemyType.damage[0] + Math.random() * (enemyType.damage[1] - enemyType.damage[0]);
+
+                setPlayer(prev => {
+                    const newHp = Math.max(0, prev.currentHp - Math.floor(damage));
+                    if (newHp <= 0) {
+                        setGameState('gameOver');
+                    }
+                    return { ...prev, currentHp: newHp };
+                });
+
+                addMessage(`${enemyType.name} inflige ${Math.floor(damage)} dégâts!`, 'damage');
+            };
+
+            const performAttack = () => {
+                if (attackCooldownRef.current > 0) return;
+
+                const weapon = equipment.mainHand || 'fist';
+                const weaponData = WEAPONS[weapon];
+                const attackSpeed = weaponData.speed || 1.0;
+
+                attackCooldownRef.current = attackSpeed;
+
+                // Trouver l'ennemi le plus proche devant le joueur
+                const attackRange = 2;
+                let closestEnemy = null;
+                let closestDistance = attackRange;
+
+                entities.forEach((entity, index) => {
+                    if (!entity.active || entity.hp <= 0) return;
+
+                    const dx = entity.x - player.x;
+                    const dy = entity.y - player.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    if (distance < closestDistance) {
+                        const angleToEnemy = Math.atan2(dy, dx);
+                        let angleDiff = angleToEnemy - player.angle;
+                        while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+                        while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+
+                        if (Math.abs(angleDiff) < Math.PI / 4) {
+                            closestEnemy = { entity, index };
+                            closestDistance = distance;
+                        }
+                    }
+                });
+
+                if (closestEnemy) {
+                    const result = physicalAttack(player, closestEnemy.entity, weapon);
+
+                    if (result.hit) {
+                        setEntities(prev => {
+                            const newEntities = [...prev];
+                            newEntities[closestEnemy.index] = {
+                                ...newEntities[closestEnemy.index],
+                                hp: Math.max(0, newEntities[closestEnemy.index].hp - result.damage),
+                            };
+
+                            if (newEntities[closestEnemy.index].hp <= 0) {
+                                const enemyType = ENEMY_TYPES[newEntities[closestEnemy.index].type];
+                                gainXp(enemyType.xp);
+                                addMessage(`${enemyType.name} vaincu! +${enemyType.xp} XP`, 'success');
+                            }
+
+                            return newEntities;
+                        });
+
+                        const critMsg = result.critical ? ' CRITIQUE!' : '';
+                        addMessage(`Vous infligez ${result.damage} dégâts${critMsg}`, 'attack');
+                    } else {
+                        addMessage(result.message, 'info');
+                    }
+                } else {
+                    addMessage('Aucune cible à portée', 'info');
+                }
+            };
+
+            const gainXp = (amount) => {
+                setPlayer(prev => {
+                    const raceData = RACES[character.race];
+                    const xpGain = Math.floor(amount * (raceData.xpBonus || 1));
+                    const newXp = prev.xp + xpGain;
+                    const xpNeeded = prev.level * 100;
+
+                    if (newXp >= xpNeeded) {
+                        levelUp();
+                        return { ...prev, xp: newXp - xpNeeded };
+                    }
+
+                    return { ...prev, xp: newXp };
+                });
+            };
+
+            const levelUp = () => {
+                setPlayer(prev => {
+                    const newLevel = prev.level + 1;
+                    const derived = calculateDerivedStats(prev, newLevel, character.class, character.race);
+
+                    addMessage(`NIVEAU ${newLevel} atteint!`, 'success');
+
+                    return {
+                        ...prev,
+                        level: newLevel,
+                        maxHp: derived.maxHp,
+                        currentHp: derived.maxHp,
+                        maxMana: derived.maxMana,
+                        currentMana: derived.maxMana,
+                        ...derived,
+                    };
+                });
+            };
+
+            const useQuickSlot = (slot) => {
+                // Utiliser un objet de l'inventaire rapide
+            };
+
+            const addMessage = (text, type = 'info') => {
+                setMessages(prev => [...prev.slice(-4), { text, type, id: Date.now() }]);
+            };
+
+            const renderGame = () => {
+                if (engineRef.current && player && dungeon) {
+                    const activeEntities = entities.filter(e => e.active && e.hp > 0);
+                    engineRef.current.render(player, dungeon, activeEntities);
+                }
+            };
+
+            const startGame = (char) => {
+                const derived = calculateDerivedStats(char.attributes, 1, char.class, char.race);
+
+                const newPlayer = {
+                    ...char.attributes,
+                    level: 1,
+                    xp: 0,
+                    currentHp: derived.maxHp,
+                    currentMana: derived.maxMana,
+                    ...derived,
+                    x: 5,
+                    y: 5,
+                    angle: 0,
+                };
+
+                setCharacter(char);
+                setPlayer(newPlayer);
+                generateNewDungeon(0, 0);
+                setGameState('playing');
+                addMessage('Bienvenue dans les Donjons Maudits!', 'info');
+            };
+
+            const generateNewDungeon = (dungeonId, level) => {
+                const generator = new DungeonGenerator(40, 40, {});
+                const generated = generator.generate();
+
+                setDungeon(generated);
+                setPlayer(prev => ({
+                    ...prev,
+                    x: generated.spawn.x + 0.5,
+                    y: generated.spawn.y + 0.5,
+                }));
+
+                // Générer des ennemis
+                const dungeonData = DUNGEONS[dungeonId];
+                const newEntities = [];
+
+                for (let i = 0; i < 10; i++) {
+                    const room = generated.rooms[Math.floor(Math.random() * generated.rooms.length)];
+                    if (!room) continue;
+
+                    const enemyType = dungeonData.enemyTypes[Math.floor(Math.random() * dungeonData.enemyTypes.length)];
+                    const enemyData = ENEMY_TYPES[enemyType];
+
+                    newEntities.push({
+                        type: enemyType,
+                        x: room.center.x + Math.random() * 2 - 1,
+                        y: room.center.y + Math.random() * 2 - 1,
+                        hp: enemyData.hp,
+                        maxHp: enemyData.hp,
+                        sprite: enemyData.sprite,
+                        speed: enemyData.speed,
+                        active: true,
+                    });
+                }
+
+                setEntities(newEntities);
+                setCurrentDungeon(dungeonId);
+                setCurrentLevel(level);
+            };
+
+            const nextLevel = () => {
+                if (currentLevel < 2) {
+                    generateNewDungeon(currentDungeon, currentLevel + 1);
+                    addMessage('Vous descendez au niveau suivant...', 'info');
+                } else if (currentDungeon < DUNGEONS.length - 1) {
+                    generateNewDungeon(currentDungeon + 1, 0);
+                    addMessage(`Vous entrez dans ${DUNGEONS[currentDungeon + 1].name}!`, 'info');
+                } else {
+                    setGameState('victory');
+                }
+            };
+
+            // ==================== RENDU UI ====================
+
+            if (gameState === 'menu') {
+                return (
+                    <div className="w-screen h-screen bg-gradient-to-b from-gray-900 via-purple-900 to-black flex items-center justify-center">
+                        <div className="text-center">
+                            <h1 className="text-6xl font-bold text-yellow-400 mb-8 glow medieval-font">
+                                LES DONJONS MAUDITS
+                            </h1>
+                            <p className="text-xl text-gray-300 mb-12 max-w-2xl mx-auto">
+                                Dans un royaume en ruines, d'anciens donjons referment surface,
+                                libérant des horreurs oubliées. Explorez 5 donjons maudits,
+                                vaincre leurs gardiens, et assembler les fragments d'un artefact légendaire.
+                            </p>
+                            <button
+                                onClick={() => setGameState('charCreation')}
+                                className="px-12 py-4 bg-red-700 hover:bg-red-600 text-white text-2xl font-bold rounded-lg transition transform hover:scale-105"
+                            >
+                                NOUVELLE PARTIE
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (gameState === 'charCreation') {
+                return <CharacterCreation onComplete={startGame} onBack={() => setGameState('menu')} />;
+            }
+
+            if (gameState === 'gameOver') {
+                return (
+                    <div className="w-screen h-screen bg-black flex items-center justify-center">
+                        <div className="text-center">
+                            <h1 className="text-6xl font-bold text-red-600 mb-8 medieval-font">VOUS ÊTES MORT</h1>
+                            <p className="text-xl text-gray-400 mb-8">
+                                Niveau atteint: {player?.level} | XP: {player?.xp}
+                            </p>
+                            <button
+                                onClick={() => setGameState('menu')}
+                                className="px-8 py-3 bg-gray-700 hover:bg-gray-600 text-white text-xl rounded"
+                            >
+                                Retour au menu
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (gameState === 'victory') {
+                return (
+                    <div className="w-screen h-screen bg-gradient-to-b from-yellow-900 via-yellow-700 to-yellow-500 flex items-center justify-center">
+                        <div className="text-center">
+                            <h1 className="text-6xl font-bold text-white mb-8 medieval-font glow">VICTOIRE!</h1>
+                            <p className="text-2xl text-gray-900 mb-8">
+                                Vous avez vaincu l'Entité du Néant et sauvé le royaume!
+                            </p>
+                            <p className="text-xl text-gray-800 mb-8">
+                                Niveau final: {player?.level} | XP total: {player?.xp}
+                            </p>
+                            <button
+                                onClick={() => setGameState('menu')}
+                                className="px-8 py-3 bg-purple-900 hover:bg-purple-800 text-white text-xl rounded"
+                            >
+                                Retour au menu
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (gameState === 'playing' || gameState === 'paused') {
+                return (
+                    <div className="w-screen h-screen bg-black flex flex-col">
+                        {/* Zone de rendu 3D */}
+                        <div className="flex-1 flex items-center justify-center bg-gray-900">
+                            <canvas ref={canvasRef} className="border-4 border-gray-800" />
+                        </div>
+
+                        {/* HUD */}
+                        <div className="h-48 bg-gray-900 border-t-4 border-yellow-700 p-4">
+                            <div className="grid grid-cols-3 gap-4 h-full">
+                                {/* Gauche - Stats */}
+                                <div className="space-y-2">
+                                    <div>
+                                        <div className="flex justify-between text-sm text-red-400 mb-1">
+                                            <span>VIE</span>
+                                            <span>{player?.currentHp}/{player?.maxHp}</span>
+                                        </div>
+                                        <div className="w-full bg-gray-800 h-4 rounded">
+                                            <div
+                                                className="bg-red-600 h-full rounded stat-bar"
+                                                style={{ width: `${(player?.currentHp / player?.maxHp) * 100}%` }}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <div className="flex justify-between text-sm text-blue-400 mb-1">
+                                            <span>MANA</span>
+                                            <span>{player?.currentMana}/{player?.maxMana}</span>
+                                        </div>
+                                        <div className="w-full bg-gray-800 h-4 rounded">
+                                            <div
+                                                className="bg-blue-600 h-full rounded stat-bar"
+                                                style={{ width: `${(player?.currentMana / player?.maxMana) * 100}%` }}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <div className="flex justify-between text-sm text-yellow-400 mb-1">
+                                            <span>XP</span>
+                                            <span>{player?.xp}/{player?.level * 100}</span>
+                                        </div>
+                                        <div className="w-full bg-gray-800 h-4 rounded">
+                                            <div
+                                                className="bg-yellow-600 h-full rounded stat-bar"
+                                                style={{ width: `${(player?.xp / (player?.level * 100)) * 100}%` }}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="text-sm text-gray-400">
+                                        <span>Niveau {player?.level}</span> |
+                                        <span className="ml-2">{character?.class && CLASSES[character.class].name}</span>
+                                    </div>
+                                </div>
+
+                                {/* Centre - Messages */}
+                                <div className="flex flex-col justify-end space-y-1">
+                                    {messages.map(msg => (
+                                        <div
+                                            key={msg.id}
+                                            className={`text-sm ${
+                                                msg.type === 'damage' ? 'text-red-400' :
+                                                msg.type === 'attack' ? 'text-orange-400' :
+                                                msg.type === 'success' ? 'text-green-400' :
+                                                'text-gray-400'
+                                            }`}
+                                        >
+                                            {msg.text}
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {/* Droite - Info */}
+                                <div className="text-right text-sm text-gray-400 space-y-1">
+                                    <div className="text-yellow-500 font-bold">
+                                        {DUNGEONS[currentDungeon]?.name}
+                                    </div>
+                                    <div>Niveau {currentLevel + 1}/3</div>
+                                    <div>Ennemis: {entities.filter(e => e.hp > 0).length}</div>
+                                    <div className="mt-4 text-xs">
+                                        <div>ESPACE: Attaquer</div>
+                                        <div>Flèches/ZQSD: Déplacer</div>
+                                        <div>ESC: Pause</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Menu Pause */}
+                        {gameState === 'paused' && (
+                            <div className="absolute inset-0 bg-black bg-opacity-75 flex items-center justify-center">
+                                <div className="bg-gray-800 p-8 rounded-lg">
+                                    <h2 className="text-3xl text-yellow-400 mb-6 medieval-font">PAUSE</h2>
+                                    <div className="space-y-4">
+                                        <button
+                                            onClick={() => setGameState('playing')}
+                                            className="w-full px-6 py-3 bg-green-700 hover:bg-green-600 text-white rounded"
+                                        >
+                                            Reprendre
+                                        </button>
+                                        <button
+                                            onClick={() => setGameState('menu')}
+                                            className="w-full px-6 py-3 bg-red-700 hover:bg-red-600 text-white rounded"
+                                        >
+                                            Quitter
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                );
+            }
+
+            return null;
+        }
+
+        // ==================== CRÉATION DE PERSONNAGE ====================
+
+        function CharacterCreation({ onComplete, onBack }) {
+            const [step, setStep] = useState(1);
+            const [name, setName] = useState('');
+            const [race, setRace] = useState('human');
+            const [playerClass, setPlayerClass] = useState('warrior');
+            const [attributes, setAttributes] = useState({
+                str: 10,
+                end: 10,
+                agi: 10,
+                int: 10,
+                wis: 10,
+                per: 10,
+            });
+            const [pointsRemaining, setPointsRemaining] = useState(15);
+
+            const adjustAttribute = (attr, delta) => {
+                const newValue = attributes[attr] + delta;
+                if (newValue < 5 || newValue > 20) return;
+                if (delta > 0 && pointsRemaining <= 0) return;
+
+                setAttributes(prev => ({ ...prev, [attr]: newValue }));
+                setPointsRemaining(prev => prev - delta);
+            };
+
+            const handleComplete = () => {
+                if (!name.trim()) {
+                    alert('Veuillez entrer un nom');
+                    return;
+                }
+
+                const raceData = RACES[race];
+                const finalAttributes = {
+                    str: attributes.str + raceData.bonusStats.str,
+                    end: attributes.end + raceData.bonusStats.end,
+                    agi: attributes.agi + raceData.bonusStats.agi,
+                    int: attributes.int + raceData.bonusStats.int,
+                    wis: attributes.wis + raceData.bonusStats.wis,
+                    per: attributes.per + raceData.bonusStats.per,
+                };
+
+                onComplete({
+                    name,
+                    race,
+                    class: playerClass,
+                    attributes: finalAttributes,
+                });
+            };
+
+            return (
+                <div className="w-screen h-screen bg-gradient-to-b from-gray-900 to-black flex items-center justify-center p-8">
+                    <div className="bg-gray-800 rounded-lg p-8 max-w-4xl w-full">
+                        <h2 className="text-4xl text-yellow-400 mb-8 medieval-font text-center">
+                            CRÉATION DE PERSONNAGE
+                        </h2>
+
+                        {/* Étape 1: Nom */}
+                        {step === 1 && (
+                            <div className="space-y-6">
+                                <div>
+                                    <label className="block text-white mb-2">Nom du personnage</label>
+                                    <input
+                                        type="text"
+                                        value={name}
+                                        onChange={(e) => setName(e.target.value)}
+                                        className="w-full px-4 py-3 bg-gray-700 text-white rounded"
+                                        placeholder="Entrez votre nom..."
+                                        autoFocus
+                                    />
+                                </div>
+
+                                <div className="flex justify-between">
+                                    <button onClick={onBack} className="px-6 py-3 bg-gray-600 hover:bg-gray-500 text-white rounded">
+                                        Retour
+                                    </button>
+                                    <button onClick={() => setStep(2)} className="px-6 py-3 bg-blue-700 hover:bg-blue-600 text-white rounded">
+                                        Suivant
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Étape 2: Race */}
+                        {step === 2 && (
+                            <div className="space-y-6">
+                                <div>
+                                    <label className="block text-white mb-4 text-xl">Choisissez votre race</label>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        {Object.entries(RACES).map(([key, data]) => (
+                                            <div
+                                                key={key}
+                                                onClick={() => setRace(key)}
+                                                className={`p-4 rounded cursor-pointer border-2 transition ${
+                                                    race === key ? 'border-yellow-400 bg-gray-700' : 'border-gray-600 bg-gray-750 hover:border-gray-500'
+                                                }`}
+                                            >
+                                                <h3 className="text-xl text-yellow-400 mb-2">{data.name}</h3>
+                                                <p className="text-sm text-gray-400 mb-2">{data.passive}</p>
+                                                <div className="text-xs text-gray-500">
+                                                    {Object.entries(data.bonusStats).map(([stat, value]) => (
+                                                        value !== 0 && <span key={stat} className="mr-2">{stat.toUpperCase()} {value > 0 ? '+' : ''}{value}</span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="flex justify-between">
+                                    <button onClick={() => setStep(1)} className="px-6 py-3 bg-gray-600 hover:bg-gray-500 text-white rounded">
+                                        Retour
+                                    </button>
+                                    <button onClick={() => setStep(3)} className="px-6 py-3 bg-blue-700 hover:bg-blue-600 text-white rounded">
+                                        Suivant
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Étape 3: Classe */}
+                        {step === 3 && (
+                            <div className="space-y-6">
+                                <div>
+                                    <label className="block text-white mb-4 text-xl">Choisissez votre classe</label>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        {Object.entries(CLASSES).map(([key, data]) => (
+                                            <div
+                                                key={key}
+                                                onClick={() => setPlayerClass(key)}
+                                                className={`p-4 rounded cursor-pointer border-2 transition ${
+                                                    playerClass === key ? 'border-yellow-400 bg-gray-700' : 'border-gray-600 bg-gray-750 hover:border-gray-500'
+                                                }`}
+                                            >
+                                                <h3 className="text-xl text-yellow-400 mb-2">{data.name}</h3>
+                                                <p className="text-sm text-gray-400">
+                                                    Stats principales: {data.mainStats.map(s => s.toUpperCase()).join(', ')}
+                                                </p>
+                                                <p className="text-xs text-gray-500 mt-2">
+                                                    HP: +{data.hpBonus} | Mana: +{data.manaBonus}
+                                                </p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="flex justify-between">
+                                    <button onClick={() => setStep(2)} className="px-6 py-3 bg-gray-600 hover:bg-gray-500 text-white rounded">
+                                        Retour
+                                    </button>
+                                    <button onClick={() => setStep(4)} className="px-6 py-3 bg-blue-700 hover:bg-blue-600 text-white rounded">
+                                        Suivant
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Étape 4: Attributs */}
+                        {step === 4 && (
+                            <div className="space-y-6">
+                                <div>
+                                    <div className="text-white mb-4 text-xl">
+                                        Répartir les attributs
+                                        <span className="ml-4 text-yellow-400">Points restants: {pointsRemaining}</span>
+                                    </div>
+
+                                    <div className="space-y-3">
+                                        {Object.entries(attributes).map(([attr, value]) => (
+                                            <div key={attr} className="flex items-center justify-between bg-gray-700 p-3 rounded">
+                                                <span className="text-white w-32">{attr.toUpperCase()}</span>
+                                                <div className="flex items-center gap-4">
+                                                    <button
+                                                        onClick={() => adjustAttribute(attr, -1)}
+                                                        className="px-3 py-1 bg-red-700 hover:bg-red-600 text-white rounded"
+                                                        disabled={value <= 5}
+                                                    >
+                                                        -
+                                                    </button>
+                                                    <span className="text-white text-xl w-12 text-center">{value}</span>
+                                                    <button
+                                                        onClick={() => adjustAttribute(attr, 1)}
+                                                        className="px-3 py-1 bg-green-700 hover:bg-green-600 text-white rounded"
+                                                        disabled={value >= 20 || pointsRemaining <= 0}
+                                                    >
+                                                        +
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="bg-gray-700 p-4 rounded">
+                                    <h3 className="text-yellow-400 mb-2">Récapitulatif</h3>
+                                    <p className="text-white">Nom: {name}</p>
+                                    <p className="text-white">Race: {RACES[race].name}</p>
+                                    <p className="text-white">Classe: {CLASSES[playerClass].name}</p>
+                                </div>
+
+                                <div className="flex justify-between">
+                                    <button onClick={() => setStep(3)} className="px-6 py-3 bg-gray-600 hover:bg-gray-500 text-white rounded">
+                                        Retour
+                                    </button>
+                                    <button
+                                        onClick={handleComplete}
+                                        className="px-6 py-3 bg-green-700 hover:bg-green-600 text-white rounded text-xl"
+                                    >
+                                        COMMENCER L'AVENTURE
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // ==================== LANCEMENT ====================
+
+        ReactDOM.render(<DungeonCrawler />, document.getElementById('root'));
+    </script>
+</body>
+</html>
