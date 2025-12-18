@@ -31,6 +31,12 @@ const LEVELS = [
     multiplier: 1,
     gravity: 0.25,
     jumpForce: -6.5,
+    character: {
+      color: 'bg-yellow-400',
+      border: 'border-yellow-600',
+      emoji: '🐤',
+      name: 'Poussin'
+    },
     theme: {
       bg: 'from-sky-400 to-blue-300',
       obstacle: 'bg-green-600',
@@ -47,6 +53,12 @@ const LEVELS = [
     multiplier: 1.5,
     gravity: 0.28,
     jumpForce: -7,
+    character: {
+      color: 'bg-red-500',
+      border: 'border-red-700',
+      emoji: '🔴',
+      name: 'Cardinal'
+    },
     theme: {
       bg: 'from-orange-400 via-pink-400 to-purple-400',
       obstacle: 'bg-purple-600',
@@ -63,6 +75,12 @@ const LEVELS = [
     multiplier: 2,
     gravity: 0.32,
     jumpForce: -7.5,
+    character: {
+      color: 'bg-blue-500',
+      border: 'border-blue-700',
+      emoji: '🔵',
+      name: 'Geai Bleu'
+    },
     theme: {
       bg: 'from-indigo-500 via-purple-500 to-pink-500',
       obstacle: 'bg-indigo-700',
@@ -79,6 +97,12 @@ const LEVELS = [
     multiplier: 2.5,
     gravity: 0.35,
     jumpForce: -8,
+    character: {
+      color: 'bg-purple-500',
+      border: 'border-purple-700',
+      emoji: '🟣',
+      name: 'Colibri Violet'
+    },
     theme: {
       bg: 'from-slate-800 via-blue-900 to-indigo-900',
       obstacle: 'bg-cyan-500',
@@ -95,6 +119,12 @@ const LEVELS = [
     multiplier: 3,
     gravity: 0.38,
     jumpForce: -8.5,
+    character: {
+      color: 'bg-gradient-to-br from-yellow-400 via-pink-500 to-purple-600',
+      border: 'border-yellow-400',
+      emoji: '⭐',
+      name: 'Phénix Cosmique'
+    },
     theme: {
       bg: 'from-purple-900 via-indigo-900 to-black',
       obstacle: 'bg-gradient-to-b from-purple-500 to-pink-500',
@@ -434,58 +464,96 @@ function App() {
         {/* ÉCRAN DE MENU */}
         {/* ═══════════════════════════════════════════════════════ */}
         {gameState === GAME_STATE.MENU && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-sm">
-            <h1 className="text-7xl font-bold text-white mb-8 drop-shadow-2xl animate-pulse">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-sm p-6">
+            <h1 className="text-7xl font-bold text-white mb-4 drop-shadow-2xl animate-pulse">
               🐦 FLAPPY BIRD
             </h1>
-            <div className="bg-white/90 backdrop-blur rounded-2xl p-8 shadow-2xl max-w-md">
-              <h2 className="text-2xl font-bold text-gray-800 mb-4 text-center">
-                5 Niveaux de Difficulté
+            <p className="text-white text-xl mb-8 drop-shadow-lg">
+              Choisis ton niveau et ton personnage !
+            </p>
+
+            <div className="bg-white/95 backdrop-blur rounded-3xl p-8 shadow-2xl max-w-3xl">
+              <h2 className="text-3xl font-bold text-gray-800 mb-6 text-center">
+                Sélectionne un Niveau
               </h2>
-              <div className="space-y-3 mb-6">
+
+              {/* Grille de sélection de niveau */}
+              <div className="grid grid-cols-5 gap-4 mb-6">
                 {LEVELS.map((lvl, idx) => (
-                  <div key={lvl.id} className="flex items-center justify-between text-sm">
-                    <span className="font-semibold text-gray-700">
-                      {lvl.id}. {lvl.name}
-                    </span>
-                    <span className="text-gray-600">→ {lvl.targetScore} obstacles</span>
-                  </div>
+                  <button
+                    key={lvl.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      startCountdown(idx);
+                    }}
+                    className="group relative bg-gradient-to-br from-gray-50 to-gray-100 hover:from-white hover:to-gray-50 border-4 border-gray-300 hover:border-blue-500 rounded-2xl p-4 shadow-lg hover:shadow-2xl transform hover:scale-105 transition-all duration-200 cursor-pointer"
+                  >
+                    {/* Badge du niveau */}
+                    <div className="absolute -top-3 -right-3 bg-blue-600 text-white font-bold text-sm w-8 h-8 rounded-full flex items-center justify-center shadow-lg">
+                      {lvl.id}
+                    </div>
+
+                    {/* Personnage */}
+                    <div className="flex flex-col items-center space-y-3">
+                      <div className={`w-16 h-16 ${lvl.character.color} border-4 ${lvl.character.border} rounded-full shadow-xl flex items-center justify-center text-3xl group-hover:animate-bounce`}>
+                        {lvl.character.emoji}
+                      </div>
+                      <div className="text-center">
+                        <p className="font-bold text-gray-800 text-xs leading-tight">
+                          {lvl.character.name}
+                        </p>
+                        <p className="text-[10px] text-gray-500 mt-1">
+                          {lvl.targetScore} obstacles
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Indicateur de difficulté */}
+                    <div className="mt-2 flex justify-center space-x-0.5">
+                      {Array.from({ length: 5 }).map((_, i) => (
+                        <div
+                          key={i}
+                          className={`w-1.5 h-1.5 rounded-full ${
+                            i < lvl.id ? 'bg-orange-500' : 'bg-gray-300'
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  </button>
                 ))}
               </div>
-              <div className="border-t-2 border-gray-300 pt-4 mb-6">
-                <h3 className="font-bold text-gray-800 mb-3">Contrôles :</h3>
-                <div className="space-y-2 text-sm text-gray-700">
+
+              {/* Contrôles */}
+              <div className="border-t-2 border-gray-300 pt-6 mb-4">
+                <h3 className="font-bold text-gray-800 mb-3 text-center">Contrôles</h3>
+                <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm text-gray-700">
                   <div className="flex justify-between">
                     <span className="font-semibold">Sauter :</span>
-                    <span>ESPACE / ↑ / W / Z / ENTRÉE</span>
+                    <span className="text-xs">ESPACE / ↑ / W / Z</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="font-semibold">Pause :</span>
-                    <span>ÉCHAP / P</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="font-semibold">Recommencer :</span>
-                    <span>R</span>
+                    <span className="text-xs">ÉCHAP / P</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="font-semibold">Clic souris :</span>
-                    <span>Sauter / Sélectionner</span>
+                    <span className="text-xs">Sauter</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="font-semibold">Recommencer :</span>
+                    <span className="text-xs">R</span>
                   </div>
                 </div>
               </div>
+
+              {/* Meilleur score */}
               {bestScore > 0 && (
-                <div className="bg-yellow-100 border-2 border-yellow-400 rounded-lg p-3 mb-4">
-                  <p className="text-center font-bold text-yellow-800">
+                <div className="bg-gradient-to-r from-yellow-100 to-orange-100 border-2 border-yellow-400 rounded-xl p-4">
+                  <p className="text-center font-bold text-yellow-800 text-lg">
                     🏆 Meilleur Score : {bestScore}
                   </p>
                 </div>
               )}
-              <button
-                className="w-full bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold py-4 px-8 rounded-xl shadow-lg transform hover:scale-105 transition-all duration-200"
-                onClick={() => startCountdown(0)}
-              >
-                JOUER
-              </button>
             </div>
           </div>
         )}
@@ -496,15 +564,27 @@ function App() {
         {gameState === GAME_STATE.LEVEL_COMPLETE && countdown !== null && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 backdrop-blur-sm">
             <div className="bg-white/95 backdrop-blur rounded-3xl p-12 shadow-2xl text-center">
-              <h2 className="text-4xl font-bold text-gray-800 mb-4">
+              {/* Affichage du personnage */}
+              <div className="flex justify-center mb-6">
+                <div className={`w-24 h-24 ${level.character.color} border-4 ${level.character.border} rounded-full shadow-2xl flex items-center justify-center text-5xl animate-bounce`}>
+                  {level.character.emoji}
+                </div>
+              </div>
+
+              <h2 className="text-4xl font-bold text-gray-800 mb-2">
                 Niveau {level.id}
               </h2>
-              <h3 className="text-2xl font-semibold text-gray-600 mb-8">
+              <h3 className="text-2xl font-semibold text-gray-600 mb-2">
                 {level.name}
               </h3>
+              <p className="text-lg text-blue-600 font-bold mb-8">
+                Personnage : {level.character.name}
+              </p>
+
               <div className="text-9xl font-bold text-blue-600 animate-bounce">
                 {countdown > 0 ? countdown : 'GO!'}
               </div>
+
               <div className="mt-8 text-gray-700">
                 <p className="text-lg">Objectif : {level.targetScore} obstacles</p>
                 <p className="text-sm text-gray-500 mt-2">
@@ -520,9 +600,9 @@ function App() {
         {/* ═══════════════════════════════════════════════════════ */}
         {(gameState === GAME_STATE.PLAYING || gameState === GAME_STATE.PAUSED) && (
           <>
-            {/* Oiseau */}
+            {/* Oiseau / Personnage */}
             <div
-              className="absolute bg-yellow-400 rounded-full border-4 border-yellow-600 shadow-lg transition-transform"
+              className={`absolute ${level.character.color} rounded-full border-4 ${level.character.border} shadow-lg transition-transform flex items-center justify-center text-2xl font-bold`}
               style={{
                 left: 100,
                 top: birdY,
@@ -531,8 +611,7 @@ function App() {
                 transform: `rotate(${Math.max(-30, Math.min(30, birdVelocity * 3))}deg)`,
               }}
             >
-              <div className="absolute top-1/4 left-1/4 w-2 h-2 bg-black rounded-full"></div>
-              <div className="absolute top-1/4 right-1/4 w-2 h-2 bg-black rounded-full"></div>
+              {level.character.emoji}
             </div>
 
             {/* Obstacles */}
