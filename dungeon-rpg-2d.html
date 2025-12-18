@@ -866,22 +866,24 @@
                         </div>
                     </div>
 
-                    {/* Canvas */}
-                    <div className="canvas-container">
-                        <canvas
-                            ref={canvasRef}
-                            width={CANVAS_WIDTH}
-                            height={CANVAS_HEIGHT}
-                            style={{ border: '2px solid #8b5cf6', borderRadius: '8px' }}
-                        />
-                        <div className="controls-hint">
-                            ⌨️ Flèches ou WASD pour se déplacer • 💎 Collectez les objets • ⚔️ Combattez les ennemis
+                    {/* Canvas - Exploration */}
+                    {gameState === GAME_STATES.EXPLORATION && (
+                        <div className="canvas-container">
+                            <canvas
+                                ref={canvasRef}
+                                width={CANVAS_WIDTH}
+                                height={CANVAS_HEIGHT}
+                                style={{ border: '2px solid #8b5cf6', borderRadius: '8px' }}
+                            />
+                            <div className="controls-hint">
+                                ⌨️ Flèches ou WASD pour se déplacer • 💎 Collectez les objets • ⚔️ Combattez les ennemis
+                            </div>
                         </div>
-                    </div>
+                    )}
 
-                    {/* Combat overlay */}
+                    {/* Combat Screen */}
                     {gameState === GAME_STATES.COMBAT && combat && (
-                        <div className="combat-overlay">
+                        <div className="canvas-container" style={{ background: '#1f2937' }}>
                             <div className="combat-panel">
                                 <div className="enemy-display">
                                     <div className="enemy-name">{combat.enemy.name}</div>
