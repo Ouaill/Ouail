@@ -732,7 +732,21 @@
             // Exploration - actions de salle
             const exploreRoom = () => {
                 const floor = FLOORS[currentFloor];
+
+                // Vérifier que roomsData existe et n'est pas vide
+                if (!roomsData || roomsData.length === 0) {
+                    console.error("roomsData is empty, regenerating...");
+                    generateRoomsForFloor(currentFloor);
+                    return;
+                }
+
                 const room = roomsData[currentRoom];
+
+                // Vérifier que la salle existe
+                if (!room) {
+                    console.error("Room not found:", currentRoom);
+                    return;
+                }
 
                 // Marquer la salle comme visitée
                 setRoomsData(prev => prev.map((r, i) =>
@@ -1166,7 +1180,12 @@
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <button
                                     onClick={exploreRoom}
-                                    className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-8 px-6 rounded-lg text-xl transition-all transform hover:scale-105 pulse-glow"
+                                    disabled={!roomsData || roomsData.length === 0}
+                                    className={`font-bold py-8 px-6 rounded-lg text-xl transition-all transform ${
+                                        roomsData && roomsData.length > 0
+                                            ? 'bg-purple-600 hover:bg-purple-700 text-white hover:scale-105 pulse-glow cursor-pointer'
+                                            : 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50'
+                                    }`}
                                 >
                                     🚪 Explorer la salle suivante
                                 </button>
