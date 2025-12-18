@@ -1,0 +1,1425 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Le Donjon des Ténèbres - RPG</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 20px rgba(139, 92, 246, 0.5); }
+            50% { box-shadow: 0 0 40px rgba(139, 92, 246, 0.8); }
+        }
+        .pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-10px); }
+            75% { transform: translateX(10px); }
+        }
+        .shake { animation: shake 0.5s ease-in-out; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .fade-in { animation: fadeIn 0.5s ease-out; }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+        }
+        .float { animation: float 3s ease-in-out infinite; }
+
+        .hp-bar { transition: width 0.5s ease-out; }
+        .mp-bar { transition: width 0.5s ease-out; }
+
+        body {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+        }
+    </style>
+</head>
+<body class="antialiased">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // ==================== CONSTANTES DU JEU ====================
+
+        const GAME_STATES = {
+            TITLE_SCREEN: 'TITLE_SCREEN',
+            EXPLORATION: 'EXPLORATION',
+            COMBAT: 'COMBAT',
+            INVENTORY: 'INVENTORY',
+            LEVEL_UP: 'LEVEL_UP',
+            DIALOGUE: 'DIALOGUE',
+            GAME_OVER: 'GAME_OVER',
+            VICTORY: 'VICTORY',
+            MERCHANT: 'MERCHANT'
+        };
+
+        const PLAYER_BASE_STATS = {
+            maxHp: 100,
+            currentHp: 100,
+            maxMp: 30,
+            currentMp: 30,
+            attack: 15,
+            defense: 8,
+            magic: 12,
+            speed: 10,
+            level: 1,
+            exp: 0,
+            expToNextLevel: 100,
+            gold: 0,
+            name: "Héros"
+        };
+
+        // Compétences
+        const SKILLS = {
+            attack: { name: "Attaque", type: "physical", mpCost: 0, level: 1, multiplier: 1, description: "Attaque physique de base" },
+            defend: { name: "Défense", type: "support", mpCost: 0, level: 1, effect: "defense", description: "Réduit les dégâts de 50% ce tour" },
+            heal: { name: "Soin", type: "magic", mpCost: 8, level: 2, healing: 30, description: "Restaure 30 + Magic HP" },
+            powerStrike: { name: "Frappe Puissante", type: "physical", mpCost: 5, level: 3, multiplier: 1.8, description: "Dégâts = Attack * 1.8" },
+            fireball: { name: "Boule de Feu", type: "magic", mpCost: 12, level: 4, multiplier: 2.5, description: "Dégâts magiques puissants" },
+            focus: { name: "Concentration", type: "support", mpCost: 10, level: 5, effect: "focus", description: "+50% dégâts au prochain tour" },
+            majorHeal: { name: "Soin Majeur", type: "magic", mpCost: 20, level: 6, healing: 60, multiplier: 1.5, description: "Restaure 60 + Magic * 1.5 HP" },
+            fatalBlow: { name: "Coup Fatal", type: "physical", mpCost: 15, level: 8, multiplier: 3, accuracy: 0.8, description: "Dégâts massifs, 20% chance de rater" },
+            judgment: { name: "Jugement", type: "magic", mpCost: 30, level: 10, multiplier: 2, aoe: true, description: "Dégâts à tous les ennemis" }
+        };
+
+        // Objets consommables
+        const ITEMS = {
+            potion: { name: "Potion", effect: "heal", value: 30, price: 20, description: "+30 HP" },
+            potionPlus: { name: "Potion+", effect: "heal", value: 70, price: 50, description: "+70 HP" },
+            potionMax: { name: "Potion++", effect: "heal", value: 150, price: 120, description: "+150 HP" },
+            potionFull: { name: "Potion Max", effect: "heal", value: 9999, price: 300, description: "HP complets" },
+            ether: { name: "Éther", effect: "mp", value: 15, price: 30, description: "+15 MP" },
+            etherPlus: { name: "Éther+", effect: "mp", value: 35, price: 80, description: "+35 MP" },
+            etherMax: { name: "Éther++", effect: "mp", value: 70, price: 180, description: "+70 MP" },
+            elixir: { name: "Élixir", effect: "full", value: 0, price: 500, description: "HP & MP complets" },
+            antidote: { name: "Antidote", effect: "antidote", value: 0, price: 15, description: "Soigne le poison" },
+            phoenix: { name: "Plume de Phénix", effect: "revive", value: 0, price: 400, description: "Résurrection automatique" }
+        };
+
+        // Équipements
+        const WEAPONS = {
+            woodSword: { name: "Épée de Bois", attack: 5, price: 0 },
+            rustySword: { name: "Épée Rouillée", attack: 10, price: 0 },
+            silverBlade: { name: "Lame d'Argent", attack: 18, critBonus: 5, price: 200 },
+            cursedStaff: { name: "Bâton Maudit", attack: 12, magic: 8, price: 0 },
+            despairBlade: { name: "Lame du Désespoir", attack: 35, lifesteal: 10, price: 0 },
+            excalibur: { name: "Excalibur", attack: 50, allStats: 10, price: 0 }
+        };
+
+        const ARMORS = {
+            traveler: { name: "Habits de Voyage", defense: 3, hp: 10, price: 0 },
+            chainmail: { name: "Cotte de Mailles", defense: 8, hp: 25, price: 150 },
+            scaleArmor: { name: "Armure d'Écailles", defense: 15, hp: 50, price: 0 },
+            plateArmor: { name: "Armure de Plates", defense: 22, hp: 80, price: 400 },
+            legendary: { name: "Armure Légendaire", defense: 35, hp: 150, price: 0 }
+        };
+
+        const ACCESSORIES = {
+            none: { name: "Aucun", price: 0 },
+            lifeRing: { name: "Anneau de Vie", hp: 20, price: 100 },
+            manaAmulet: { name: "Amulette de Mana", mp: 10, price: 100 },
+            speedBoots: { name: "Bottes de Vitesse", speed: 5, price: 200 },
+            critTalisman: { name: "Talisman de Critique", critBonus: 15, price: 0 },
+            shadowCape: { name: "Cape d'Ombre", evade: 20, price: 0 }
+        };
+
+        // Ennemis par étage
+        const ENEMIES = {
+            // Étage 1
+            slime: { name: "Slime", hp: 25, attack: 8, defense: 2, speed: 5, exp: 15, gold: [5, 10], drop: { item: "potion", chance: 20 }, floor: 1 },
+            bat: { name: "Chauve-souris", hp: 20, attack: 10, defense: 1, speed: 12, exp: 18, gold: [3, 8], floor: 1 },
+            goblin: { name: "Gobelin", hp: 35, attack: 12, defense: 4, speed: 7, exp: 25, gold: [10, 20], drop: { item: "potion", chance: 30 }, floor: 1 },
+            goblinKing: { name: "Roi Gobelin", hp: 120, attack: 18, defense: 8, speed: 6, exp: 100, gold: [50, 50], drop: { weapon: "rustySword", chance: 100 }, boss: true, floor: 1 },
+
+            // Étage 2
+            skeleton: { name: "Squelette", hp: 40, attack: 15, defense: 6, speed: 8, exp: 35, gold: [12, 18], floor: 2 },
+            ghost: { name: "Fantôme", hp: 30, attack: 18, defense: 2, speed: 14, exp: 40, gold: [8, 15], drop: { item: "ether", chance: 15 }, floor: 2 },
+            zombie: { name: "Zombie", hp: 60, attack: 14, defense: 10, speed: 4, exp: 45, gold: [15, 25], drop: { item: "potionPlus", chance: 20 }, floor: 2 },
+            necromancer: { name: "Nécromancien", hp: 180, attack: 22, defense: 10, speed: 9, exp: 180, gold: [100, 100], drop: { weapon: "cursedStaff", chance: 100 }, boss: true, floor: 2, special: "summon" },
+
+            // Étage 3
+            giantRat: { name: "Rat Géant", hp: 45, attack: 16, defense: 5, speed: 15, exp: 50, gold: [10, 20], drop: { item: "antidote", chance: 25 }, floor: 3 },
+            toxicSlime: { name: "Vase Toxique", hp: 70, attack: 20, defense: 12, speed: 3, exp: 60, gold: [20, 30], drop: { item: "potionPlus", chance: 30 }, floor: 3 },
+            crocodile: { name: "Crocodile", hp: 90, attack: 25, defense: 15, speed: 6, exp: 75, gold: [25, 40], floor: 3 },
+            hydra: { name: "Hydre des Égouts", hp: 280, attack: 30, defense: 14, speed: 7, exp: 300, gold: [150, 150], drop: { armor: "scaleArmor", chance: 100 }, boss: true, floor: 3, special: "doubleAttack" },
+
+            // Étage 4
+            cursedArmor: { name: "Armure Maudite", hp: 80, attack: 28, defense: 25, speed: 5, exp: 90, gold: [30, 50], floor: 4 },
+            executioner: { name: "Bourreau", hp: 100, attack: 35, defense: 18, speed: 8, exp: 110, gold: [40, 60], drop: { item: "potionMax", chance: 20 }, floor: 4 },
+            spectre: { name: "Spectre", hp: 60, attack: 40, defense: 5, speed: 16, exp: 100, gold: [25, 45], drop: { item: "etherPlus", chance: 20 }, floor: 4 },
+            torturer: { name: "Tortionnaire", hp: 400, attack: 40, defense: 22, speed: 10, exp: 500, gold: [250, 250], drop: { weapon: "despairBlade", chance: 100 }, boss: true, floor: 4 },
+
+            // Étage 5
+            eliteGuard: { name: "Garde d'Élite", hp: 120, attack: 38, defense: 28, speed: 12, exp: 150, gold: [50, 80], drop: { item: "potionMax", chance: 40 }, floor: 5 },
+            darkMage: { name: "Mage Noir", hp: 80, attack: 45, defense: 10, speed: 14, exp: 160, gold: [60, 90], drop: { item: "etherMax", chance: 30 }, floor: 5 },
+            deathKnight: { name: "Chevalier de la Mort", hp: 150, attack: 42, defense: 32, speed: 9, exp: 200, gold: [70, 100], floor: 5 },
+            darkLord: { name: "Seigneur des Ténèbres", hp: 600, attack: 50, defense: 28, speed: 11, exp: 0, gold: [0, 0], boss: true, floor: 5, special: "enrage" }
+        };
+
+        // Structure des étages
+        const FLOORS = [
+            {
+                id: 1,
+                name: "Cavernes Sombres",
+                description: "Des grottes humides et sombres. Des bruits étranges résonnent dans l'obscurité.",
+                theme: "bg-gradient-to-b from-gray-800 to-gray-900",
+                enemies: ["slime", "bat", "goblin"],
+                boss: "goblinKing",
+                rooms: 6
+            },
+            {
+                id: 2,
+                name: "Cryptes Maudites",
+                description: "Des tombes anciennes et des couloirs hantés. L'air est glacial.",
+                theme: "bg-gradient-to-b from-purple-900 to-gray-900",
+                enemies: ["skeleton", "ghost", "zombie"],
+                boss: "necromancer",
+                rooms: 7
+            },
+            {
+                id: 3,
+                name: "Égouts Infernaux",
+                description: "Des tunnels nauséabonds remplis d'eau stagnante. Des créatures rampent dans l'ombre.",
+                theme: "bg-gradient-to-b from-green-900 to-gray-900",
+                enemies: ["giantRat", "toxicSlime", "crocodile"],
+                boss: "hydra",
+                rooms: 7
+            },
+            {
+                id: 4,
+                name: "Salles de Torture",
+                description: "Des chambres de souffrance où résonnent encore les échos du passé.",
+                theme: "bg-gradient-to-b from-red-900 to-gray-900",
+                enemies: ["cursedArmor", "executioner", "spectre"],
+                boss: "torturer",
+                rooms: 8
+            },
+            {
+                id: 5,
+                name: "Salle du Trône",
+                description: "Le cœur des ténèbres. Le Seigneur des Ténèbres vous attend.",
+                theme: "bg-gradient-to-b from-purple-950 to-black",
+                enemies: ["eliteGuard", "darkMage", "deathKnight"],
+                boss: "darkLord",
+                rooms: 8
+            }
+        ];
+
+        // ==================== COMPOSANT PRINCIPAL ====================
+
+        function DungeonRPG() {
+            const [gameState, setGameState] = useState(GAME_STATES.TITLE_SCREEN);
+            const [player, setPlayer] = useState(null);
+            const [currentFloor, setCurrentFloor] = useState(0);
+            const [currentRoom, setCurrentRoom] = useState(0);
+            const [combat, setCombat] = useState(null);
+            const [inventory, setInventory] = useState({});
+            const [equipment, setEquipment] = useState({
+                weapon: 'woodSword',
+                armor: 'traveler',
+                accessory: 'none'
+            });
+            const [battleLog, setBattleLog] = useState([]);
+            const [dialogue, setDialogue] = useState(null);
+            const [defeatedBosses, setDefeatedBosses] = useState([]);
+            const [merchantInventory, setMerchantInventory] = useState(null);
+
+            // Initialiser le jeu
+            const startNewGame = () => {
+                const newPlayer = { ...PLAYER_BASE_STATS };
+                setPlayer(newPlayer);
+                setCurrentFloor(0);
+                setCurrentRoom(0);
+                setInventory({
+                    potion: 3,
+                    ether: 1
+                });
+                setEquipment({
+                    weapon: 'woodSword',
+                    armor: 'traveler',
+                    accessory: 'none'
+                });
+                setDefeatedBosses([]);
+                setGameState(GAME_STATES.EXPLORATION);
+                addDialogue("Bienvenue, héros. Votre quête commence maintenant. Le donjon vous attend...");
+            };
+
+            // Calculer les stats avec équipement
+            const getEffectiveStats = () => {
+                if (!player) return null;
+
+                const weapon = WEAPONS[equipment.weapon];
+                const armor = ARMORS[equipment.armor];
+                const accessory = ACCESSORIES[equipment.accessory];
+
+                return {
+                    ...player,
+                    maxHp: player.maxHp + (armor.hp || 0) + (accessory.hp || 0),
+                    maxMp: player.maxMp + (accessory.mp || 0),
+                    attack: player.attack + (weapon.attack || 0) + (weapon.allStats || 0),
+                    defense: player.defense + (armor.defense || 0) + (weapon.allStats || 0),
+                    magic: player.magic + (weapon.magic || 0) + (weapon.allStats || 0),
+                    speed: player.speed + (accessory.speed || 0) + (weapon.allStats || 0),
+                    critBonus: (weapon.critBonus || 0) + (accessory.critBonus || 0),
+                    evade: accessory.evade || 0,
+                    lifesteal: weapon.lifesteal || 0
+                };
+            };
+
+            // Compétences disponibles
+            const getAvailableSkills = () => {
+                return Object.entries(SKILLS)
+                    .filter(([key, skill]) => player && skill.level <= player.level)
+                    .map(([key, skill]) => ({ id: key, ...skill }));
+            };
+
+            // Ajouter message au log
+            const addLog = (message, type = 'info') => {
+                setBattleLog(prev => [...prev, { message, type, id: Date.now() + Math.random() }]);
+            };
+
+            // Dialogue
+            const addDialogue = (text, onClose = null) => {
+                setDialogue({ text, onClose });
+                setGameState(GAME_STATES.DIALOGUE);
+            };
+
+            // Calcul des dégâts
+            const calculateDamage = (attacker, defender, skill, isMagic = false) => {
+                let baseDamage;
+
+                if (isMagic) {
+                    baseDamage = attacker.magic * (skill.multiplier || 1) - defender.defense * 0.3;
+                } else {
+                    baseDamage = attacker.attack * (skill.multiplier || 1) - defender.defense * 0.5;
+                }
+
+                baseDamage = Math.max(1, baseDamage);
+
+                // Variation aléatoire
+                baseDamage = baseDamage * (0.85 + Math.random() * 0.3);
+
+                // Critique
+                const critChance = 0.1 + (attacker.critBonus || 0) / 100;
+                const isCritical = Math.random() < critChance;
+                if (isCritical) {
+                    baseDamage *= 1.5;
+                }
+
+                return {
+                    damage: Math.floor(baseDamage),
+                    isCritical
+                };
+            };
+
+            // Démarrer un combat
+            const startCombat = (enemyKey, isBoss = false) => {
+                const enemyTemplate = ENEMIES[enemyKey];
+                const enemy = {
+                    ...enemyTemplate,
+                    key: enemyKey,
+                    currentHp: enemyTemplate.hp,
+                    maxHp: enemyTemplate.hp,
+                    defending: false,
+                    focused: false
+                };
+
+                setCombat({
+                    enemy,
+                    turn: 1,
+                    playerDefending: false,
+                    playerFocused: false,
+                    phase: enemy.special === 'enrage' ? 1 : 0
+                });
+                setBattleLog([]);
+                addLog(`Un ${enemy.name} apparaît !`, 'danger');
+                setGameState(GAME_STATES.COMBAT);
+            };
+
+            // Action de combat du joueur
+            const playerAction = (action, target = null) => {
+                if (!combat) return;
+
+                const stats = getEffectiveStats();
+                let newPlayer = { ...player };
+                let newEnemy = { ...combat.enemy };
+                let playerDamage = 0;
+                let enemyDamage = 0;
+                let newLog = [];
+
+                // Action du joueur
+                if (action.type === 'skill') {
+                    const skill = action.skill;
+
+                    // Vérifier le MP
+                    if (skill.mpCost > newPlayer.currentMp) {
+                        addLog("Pas assez de MP !", 'warning');
+                        return;
+                    }
+
+                    newPlayer.currentMp -= skill.mpCost;
+
+                    // Appliquer l'effet
+                    if (skill.type === 'physical' || skill.type === 'magic') {
+                        // Vérifier précision
+                        if (skill.accuracy && Math.random() > skill.accuracy) {
+                            newLog.push({ message: `${skill.name} a raté !`, type: 'warning' });
+                        } else {
+                            const result = calculateDamage(stats, newEnemy, skill, skill.type === 'magic');
+                            playerDamage = result.damage;
+
+                            // Appliquer focus
+                            if (combat.playerFocused) {
+                                playerDamage = Math.floor(playerDamage * 1.5);
+                            }
+
+                            newEnemy.currentHp -= playerDamage;
+
+                            let msg = `Vous utilisez ${skill.name} ! ${playerDamage} dégâts`;
+                            if (result.isCritical) msg += " (CRITIQUE !)";
+                            if (combat.playerFocused) msg += " (Concentré !)";
+                            newLog.push({ message: msg, type: 'success' });
+
+                            // Lifesteal
+                            if (stats.lifesteal) {
+                                const heal = Math.floor(playerDamage * stats.lifesteal / 100);
+                                newPlayer.currentHp = Math.min(stats.maxHp, newPlayer.currentHp + heal);
+                                newLog.push({ message: `Vous absorbez ${heal} HP`, type: 'success' });
+                            }
+                        }
+                    } else if (skill.effect === 'defense') {
+                        setCombat(prev => ({ ...prev, playerDefending: true }));
+                        newLog.push({ message: "Vous vous mettez en défense !", type: 'info' });
+                    } else if (skill.effect === 'focus') {
+                        setCombat(prev => ({ ...prev, playerFocused: true }));
+                        newLog.push({ message: "Vous vous concentrez pour le prochain coup !", type: 'info' });
+                    }
+
+                    // Soin
+                    if (skill.healing) {
+                        const healing = skill.healing + (skill.multiplier ? Math.floor(stats.magic * skill.multiplier) : stats.magic);
+                        newPlayer.currentHp = Math.min(stats.maxHp, newPlayer.currentHp + healing);
+                        newLog.push({ message: `Vous récupérez ${healing} HP`, type: 'success' });
+                    }
+                } else if (action.type === 'item') {
+                    const item = ITEMS[action.itemKey];
+
+                    if (!inventory[action.itemKey] || inventory[action.itemKey] <= 0) {
+                        addLog("Vous n'avez pas cet objet !", 'warning');
+                        return;
+                    }
+
+                    // Utiliser l'objet
+                    setInventory(prev => ({
+                        ...prev,
+                        [action.itemKey]: prev[action.itemKey] - 1
+                    }));
+
+                    if (item.effect === 'heal') {
+                        const healing = Math.min(item.value, stats.maxHp - newPlayer.currentHp);
+                        newPlayer.currentHp += healing;
+                        newLog.push({ message: `Vous utilisez ${item.name} et récupérez ${healing} HP`, type: 'success' });
+                    } else if (item.effect === 'mp') {
+                        const mpGain = Math.min(item.value, stats.maxMp - newPlayer.currentMp);
+                        newPlayer.currentMp += mpGain;
+                        newLog.push({ message: `Vous utilisez ${item.name} et récupérez ${mpGain} MP`, type: 'success' });
+                    } else if (item.effect === 'full') {
+                        newPlayer.currentHp = stats.maxHp;
+                        newPlayer.currentMp = stats.maxMp;
+                        newLog.push({ message: `Vous utilisez ${item.name} ! HP et MP restaurés !`, type: 'success' });
+                    }
+                } else if (action.type === 'flee') {
+                    if (combat.enemy.boss) {
+                        addLog("Impossible de fuir un boss !", 'danger');
+                        return;
+                    }
+
+                    const fleeChance = 0.6 - (currentFloor * 0.1);
+                    if (Math.random() < fleeChance) {
+                        addLog("Vous avez réussi à fuir !", 'success');
+                        setGameState(GAME_STATES.EXPLORATION);
+                        setCombat(null);
+                        return;
+                    } else {
+                        newLog.push({ message: "La fuite a échoué !", type: 'warning' });
+                    }
+                }
+
+                // Vérifier si l'ennemi est mort
+                if (newEnemy.currentHp <= 0) {
+                    // Victoire
+                    const goldGain = Math.floor(Math.random() * (newEnemy.gold[1] - newEnemy.gold[0] + 1)) + newEnemy.gold[0];
+                    newPlayer.gold += goldGain;
+                    newPlayer.exp += newEnemy.exp;
+
+                    newLog.push({ message: `Victoire ! +${newEnemy.exp} XP, +${goldGain} Or`, type: 'success' });
+
+                    // Drop
+                    if (newEnemy.drop) {
+                        if (Math.random() * 100 < newEnemy.drop.chance) {
+                            if (newEnemy.drop.item) {
+                                setInventory(prev => ({
+                                    ...prev,
+                                    [newEnemy.drop.item]: (prev[newEnemy.drop.item] || 0) + 1
+                                }));
+                                newLog.push({ message: `Vous obtenez ${ITEMS[newEnemy.drop.item].name} !`, type: 'success' });
+                            } else if (newEnemy.drop.weapon) {
+                                newLog.push({ message: `Vous obtenez ${WEAPONS[newEnemy.drop.weapon].name} !`, type: 'success' });
+                                setEquipment(prev => ({ ...prev, weapon: newEnemy.drop.weapon }));
+                            } else if (newEnemy.drop.armor) {
+                                newLog.push({ message: `Vous obtenez ${ARMORS[newEnemy.drop.armor].name} !`, type: 'success' });
+                                setEquipment(prev => ({ ...prev, armor: newEnemy.drop.armor }));
+                            }
+                        }
+                    }
+
+                    // Boss battu
+                    if (newEnemy.boss) {
+                        setDefeatedBosses(prev => [...prev, currentFloor]);
+
+                        if (newEnemy.key === 'darkLord') {
+                            // Victoire finale !
+                            setPlayer(newPlayer);
+                            setBattleLog(prev => [...prev, ...newLog.map(l => ({ ...l, id: Date.now() + Math.random() }))]);
+                            setTimeout(() => setGameState(GAME_STATES.VICTORY), 1500);
+                            return;
+                        }
+                    }
+
+                    // Level up ?
+                    if (newPlayer.exp >= newPlayer.expToNextLevel) {
+                        setPlayer(newPlayer);
+                        setBattleLog(prev => [...prev, ...newLog.map(l => ({ ...l, id: Date.now() + Math.random() }))]);
+                        setTimeout(() => levelUp(), 1000);
+                    } else {
+                        setPlayer(newPlayer);
+                        setBattleLog(prev => [...prev, ...newLog.map(l => ({ ...l, id: Date.now() + Math.random() }))]);
+                        setTimeout(() => {
+                            setGameState(GAME_STATES.EXPLORATION);
+                            setCombat(null);
+                        }, 2000);
+                    }
+                    return;
+                }
+
+                // Tour de l'ennemi
+                const enemyStats = { ...newEnemy, attack: newEnemy.attack, defense: newEnemy.defense, speed: newEnemy.speed, magic: 0 };
+
+                // Capacités spéciales
+                if (newEnemy.special === 'doubleAttack') {
+                    // Attaque 2 fois
+                    for (let i = 0; i < 2; i++) {
+                        const result = calculateDamage(enemyStats, stats, { multiplier: 1 }, false);
+                        let damage = result.damage;
+
+                        if (combat.playerDefending) {
+                            damage = Math.floor(damage * 0.5);
+                        }
+
+                        // Esquive
+                        if (stats.evade && Math.random() * 100 < stats.evade) {
+                            newLog.push({ message: `${newEnemy.name} attaque mais vous esquivez !`, type: 'info' });
+                        } else {
+                            newPlayer.currentHp -= damage;
+                            let msg = `${newEnemy.name} attaque (${i + 1}/2) ! ${damage} dégâts`;
+                            if (result.isCritical) msg += " (CRITIQUE !)";
+                            if (combat.playerDefending) msg += " (Réduit par défense)";
+                            newLog.push({ message: msg, type: 'danger' });
+                        }
+                    }
+                } else if (newEnemy.special === 'enrage' && newEnemy.currentHp <= newEnemy.maxHp * 0.5 && combat.phase === 1) {
+                    // Enrage à 50% HP
+                    newEnemy.attack = Math.floor(newEnemy.attack * 1.3);
+                    newEnemy.defense = Math.floor(newEnemy.defense * 1.3);
+                    newEnemy.speed = Math.floor(newEnemy.speed * 1.2);
+                    setCombat(prev => ({ ...prev, phase: 2 }));
+                    newLog.push({ message: `${newEnemy.name} entre en furie ! Ses stats augmentent !`, type: 'danger' });
+                } else if (newEnemy.special === 'summon' && combat.turn % 3 === 0) {
+                    newLog.push({ message: `${newEnemy.name} invoque un squelette !`, type: 'warning' });
+                    // On simule juste l'attaque du squelette
+                    const summonDamage = Math.floor(10 + Math.random() * 5);
+                    newPlayer.currentHp -= summonDamage;
+                    newLog.push({ message: `Le squelette attaque ! ${summonDamage} dégâts`, type: 'danger' });
+                } else {
+                    // Attaque normale
+                    const result = calculateDamage(enemyStats, stats, { multiplier: 1 }, false);
+                    let damage = result.damage;
+
+                    if (combat.playerDefending) {
+                        damage = Math.floor(damage * 0.5);
+                    }
+
+                    // Esquive
+                    if (stats.evade && Math.random() * 100 < stats.evade) {
+                        newLog.push({ message: `${newEnemy.name} attaque mais vous esquivez !`, type: 'info' });
+                    } else {
+                        newPlayer.currentHp -= damage;
+                        let msg = `${newEnemy.name} attaque ! ${damage} dégâts`;
+                        if (result.isCritical) msg += " (CRITIQUE !)";
+                        if (combat.playerDefending) msg += " (Réduit par défense)";
+                        newLog.push({ message: msg, type: 'danger' });
+                    }
+                }
+
+                // Vérifier la mort du joueur
+                if (newPlayer.currentHp <= 0) {
+                    // Phoenix ?
+                    if (inventory.phoenix && inventory.phoenix > 0) {
+                        newPlayer.currentHp = stats.maxHp;
+                        newPlayer.currentMp = stats.maxMp;
+                        setInventory(prev => ({ ...prev, phoenix: prev.phoenix - 1 }));
+                        newLog.push({ message: "La Plume de Phénix vous ressuscite !", type: 'success' });
+                    } else {
+                        setPlayer(newPlayer);
+                        setBattleLog(prev => [...prev, ...newLog.map(l => ({ ...l, id: Date.now() + Math.random() }))]);
+                        setTimeout(() => setGameState(GAME_STATES.GAME_OVER), 1000);
+                        return;
+                    }
+                }
+
+                // Mettre à jour l'état
+                setPlayer(newPlayer);
+                setCombat(prev => ({
+                    ...prev,
+                    enemy: newEnemy,
+                    turn: prev.turn + 1,
+                    playerDefending: false,
+                    playerFocused: action.type === 'skill' && action.skill.effect !== 'focus' ? false : prev.playerFocused
+                }));
+                setBattleLog(prev => [...prev, ...newLog.map(l => ({ ...l, id: Date.now() + Math.random() }))]);
+            };
+
+            // Level up
+            const levelUp = () => {
+                setGameState(GAME_STATES.LEVEL_UP);
+            };
+
+            const confirmLevelUp = () => {
+                const newLevel = player.level + 1;
+                const stats = getEffectiveStats();
+
+                setPlayer(prev => ({
+                    ...prev,
+                    level: newLevel,
+                    maxHp: prev.maxHp + 15,
+                    currentHp: stats.maxHp + 15,
+                    maxMp: prev.maxMp + 5,
+                    currentMp: stats.maxMp + 5,
+                    attack: prev.attack + 3,
+                    defense: prev.defense + 2,
+                    magic: prev.magic + 2,
+                    speed: prev.speed + 1,
+                    exp: prev.exp - prev.expToNextLevel,
+                    expToNextLevel: Math.floor(newLevel * 100 * 1.5)
+                }));
+
+                if (combat) {
+                    setGameState(GAME_STATES.COMBAT);
+                } else {
+                    setGameState(GAME_STATES.EXPLORATION);
+                }
+            };
+
+            // Exploration - actions de salle
+            const exploreRoom = () => {
+                const floor = FLOORS[currentFloor];
+
+                // Dernière salle = boss
+                if (currentRoom >= floor.rooms - 1) {
+                    if (defeatedBosses.includes(currentFloor)) {
+                        // Boss déjà battu, aller à l'étage suivant
+                        if (currentFloor < FLOORS.length - 1) {
+                            setCurrentFloor(currentFloor + 1);
+                            setCurrentRoom(0);
+                            addDialogue(`Vous descendez dans ${FLOORS[currentFloor + 1].name}...`);
+                        }
+                    } else {
+                        addDialogue(`Vous entrez dans la salle du boss. ${ENEMIES[floor.boss].name} vous attend !`, () => {
+                            startCombat(floor.boss, true);
+                        });
+                    }
+                    return;
+                }
+
+                // Salle aléatoire
+                const roomType = Math.random();
+
+                if (roomType < 0.5) {
+                    // Combat
+                    const enemyKey = floor.enemies[Math.floor(Math.random() * floor.enemies.length)];
+                    startCombat(enemyKey);
+                } else if (roomType < 0.7) {
+                    // Coffre
+                    const treasureType = Math.random();
+                    if (treasureType < 0.4) {
+                        const gold = Math.floor(20 + Math.random() * 50 * (currentFloor + 1));
+                        setPlayer(prev => ({ ...prev, gold: prev.gold + gold }));
+                        addDialogue(`Vous trouvez un coffre ! +${gold} Or`);
+                    } else if (treasureType < 0.7) {
+                        const items = Object.keys(ITEMS).filter(k => ITEMS[k].price > 0 && ITEMS[k].price < 200);
+                        const itemKey = items[Math.floor(Math.random() * items.length)];
+                        setInventory(prev => ({ ...prev, [itemKey]: (prev[itemKey] || 0) + 1 }));
+                        addDialogue(`Vous trouvez un coffre ! +1 ${ITEMS[itemKey].name}`);
+                    } else {
+                        // Équipement spécial
+                        if (currentFloor >= 2 && Math.random() < 0.3) {
+                            if (Math.random() < 0.5 && equipment.accessory === 'none') {
+                                setEquipment(prev => ({ ...prev, accessory: 'critTalisman' }));
+                                addDialogue(`Vous trouvez ${ACCESSORIES.critTalisman.name} !`);
+                            } else {
+                                const gold = Math.floor(100 + Math.random() * 100);
+                                setPlayer(prev => ({ ...prev, gold: prev.gold + gold }));
+                                addDialogue(`Vous trouvez un coffre ! +${gold} Or`);
+                            }
+                        } else {
+                            const gold = Math.floor(50 + Math.random() * 100);
+                            setPlayer(prev => ({ ...prev, gold: prev.gold + gold }));
+                            addDialogue(`Vous trouvez un coffre ! +${gold} Or`);
+                        }
+                    }
+                } else if (roomType < 0.85) {
+                    // Marchand
+                    setMerchantInventory({
+                        potion: true,
+                        potionPlus: currentFloor >= 1,
+                        potionMax: currentFloor >= 2,
+                        ether: true,
+                        etherPlus: currentFloor >= 2,
+                        elixir: currentFloor >= 3,
+                        phoenix: currentFloor >= 3
+                    });
+                    addDialogue("Vous rencontrez un marchand ambulant.", () => {
+                        setGameState(GAME_STATES.MERCHANT);
+                    });
+                } else {
+                    // Salle vide / repos
+                    const events = [
+                        "Une salle vide. Vous en profitez pour vous reposer.",
+                        "Des ossements jonchent le sol. Vous continuez prudemment.",
+                        "Une fontaine magique ! L'eau restaure un peu vos forces.",
+                        "Un piège se déclenche mais vous l'évitez de justesse !"
+                    ];
+                    const event = events[Math.floor(Math.random() * events.length)];
+
+                    if (event.includes("fontaine")) {
+                        const stats = getEffectiveStats();
+                        const heal = Math.floor(stats.maxHp * 0.3);
+                        setPlayer(prev => ({ ...prev, currentHp: Math.min(stats.maxHp, prev.currentHp + heal) }));
+                    } else if (event.includes("piège")) {
+                        const damage = Math.floor(10 + Math.random() * 15);
+                        setPlayer(prev => ({ ...prev, currentHp: Math.max(1, prev.currentHp - damage) }));
+                    }
+
+                    addDialogue(event);
+                }
+
+                setCurrentRoom(currentRoom + 1);
+            };
+
+            // Marchand
+            const buyItem = (itemKey) => {
+                const item = ITEMS[itemKey];
+                if (player.gold >= item.price) {
+                    setPlayer(prev => ({ ...prev, gold: prev.gold - item.price }));
+                    setInventory(prev => ({ ...prev, [itemKey]: (prev[itemKey] || 0) + 1 }));
+                    addLog(`Acheté ${item.name} pour ${item.price} Or`, 'success');
+                } else {
+                    addLog("Pas assez d'or !", 'danger');
+                }
+            };
+
+            const buyEquipment = (type, key) => {
+                const item = type === 'weapon' ? WEAPONS[key] : type === 'armor' ? ARMORS[key] : ACCESSORIES[key];
+                if (player.gold >= item.price) {
+                    setPlayer(prev => ({ ...prev, gold: prev.gold - item.price }));
+                    setEquipment(prev => ({ ...prev, [type]: key }));
+                    addLog(`Acheté ${item.name} pour ${item.price} Or`, 'success');
+                } else {
+                    addLog("Pas assez d'or !", 'danger');
+                }
+            };
+
+            // ==================== RENDU ====================
+
+            if (gameState === GAME_STATES.TITLE_SCREEN) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-purple-900 via-gray-900 to-black">
+                        <div className="text-center">
+                            <h1 className="text-6xl font-bold text-purple-300 mb-4 float animate-pulse">
+                                ⚔️ Le Donjon des Ténèbres ⚔️
+                            </h1>
+                            <p className="text-xl text-gray-400 mb-8">Un RPG tour par tour épique</p>
+                            <div className="space-y-4">
+                                <button
+                                    onClick={startNewGame}
+                                    className="px-8 py-4 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg text-xl pulse-glow transition-all transform hover:scale-105"
+                                >
+                                    🎮 Nouvelle Partie
+                                </button>
+                                <div className="text-gray-500 text-sm mt-8">
+                                    <p>Explorez 5 étages de donjon</p>
+                                    <p>Combattez des monstres et des boss</p>
+                                    <p>Montez en niveau et trouvez des équipements</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (gameState === GAME_STATES.DIALOGUE) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-gray-900 to-black p-4">
+                        <div className="max-w-2xl w-full bg-gray-800 rounded-lg p-8 border-4 border-purple-500 fade-in">
+                            <p className="text-xl text-gray-200 mb-6 leading-relaxed">{dialogue?.text}</p>
+                            <button
+                                onClick={() => {
+                                    if (dialogue?.onClose) {
+                                        dialogue.onClose();
+                                    }
+                                    setGameState(GAME_STATES.EXPLORATION);
+                                    setDialogue(null);
+                                }}
+                                className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg transition-all"
+                            >
+                                Continuer →
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (gameState === GAME_STATES.LEVEL_UP) {
+                const skills = getAvailableSkills();
+                const newSkills = skills.filter(s => s.level === player.level + 1);
+
+                return (
+                    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-yellow-900 via-gray-900 to-black p-4">
+                        <div className="max-w-3xl w-full bg-gray-800 rounded-lg p-8 border-4 border-yellow-500 fade-in">
+                            <h2 className="text-4xl font-bold text-yellow-400 mb-6 text-center">
+                                🎉 LEVEL UP ! 🎉
+                            </h2>
+                            <div className="text-center mb-6">
+                                <p className="text-2xl text-white mb-4">Niveau {player.level} → Niveau {player.level + 1}</p>
+                                <div className="grid grid-cols-2 gap-4 text-left bg-gray-900 p-4 rounded-lg">
+                                    <div className="text-green-400">✨ +15 HP Max</div>
+                                    <div className="text-blue-400">✨ +5 MP Max</div>
+                                    <div className="text-red-400">✨ +3 Attaque</div>
+                                    <div className="text-purple-400">✨ +2 Défense</div>
+                                    <div className="text-pink-400">✨ +2 Magie</div>
+                                    <div className="text-yellow-400">✨ +1 Vitesse</div>
+                                </div>
+                            </div>
+                            {newSkills.length > 0 && (
+                                <div className="mb-6">
+                                    <h3 className="text-2xl font-bold text-yellow-400 mb-3">Nouvelles Compétences !</h3>
+                                    <div className="space-y-2">
+                                        {newSkills.map(skill => (
+                                            <div key={skill.id} className="bg-gray-900 p-3 rounded-lg border-2 border-yellow-500">
+                                                <span className="text-xl font-bold text-yellow-300">{skill.name}</span>
+                                                <span className="text-gray-400 ml-2">- {skill.description}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            <div className="text-center">
+                                <button
+                                    onClick={confirmLevelUp}
+                                    className="px-8 py-4 bg-yellow-600 hover:bg-yellow-700 text-white font-bold rounded-lg text-xl transition-all transform hover:scale-105"
+                                >
+                                    Continuer →
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (gameState === GAME_STATES.GAME_OVER) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-red-900 via-gray-900 to-black">
+                        <div className="text-center fade-in">
+                            <h1 className="text-6xl font-bold text-red-500 mb-4">💀 GAME OVER 💀</h1>
+                            <p className="text-2xl text-gray-400 mb-8">Vous avez été vaincu...</p>
+                            <p className="text-xl text-gray-500 mb-8">
+                                Niveau atteint : {player?.level} | Étage : {currentFloor + 1}
+                            </p>
+                            <button
+                                onClick={() => {
+                                    setGameState(GAME_STATES.TITLE_SCREEN);
+                                    setPlayer(null);
+                                }}
+                                className="px-8 py-4 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg text-xl transition-all transform hover:scale-105"
+                            >
+                                Retour au menu
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (gameState === GAME_STATES.VICTORY) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-yellow-500 via-purple-600 to-black">
+                        <div className="text-center fade-in">
+                            <h1 className="text-6xl font-bold text-yellow-300 mb-4 float">
+                                👑 VICTOIRE ! 👑
+                            </h1>
+                            <p className="text-3xl text-white mb-4">Vous avez vaincu le Seigneur des Ténèbres !</p>
+                            <p className="text-xl text-gray-300 mb-8">
+                                Le donjon est libéré. Vous êtes un héros légendaire !
+                            </p>
+                            <div className="bg-gray-900 inline-block p-6 rounded-lg mb-8">
+                                <p className="text-2xl text-yellow-400">Stats finales :</p>
+                                <p className="text-xl text-white">Niveau : {player?.level}</p>
+                                <p className="text-xl text-white">Or collecté : {player?.gold}</p>
+                            </div>
+                            <div>
+                                <button
+                                    onClick={() => {
+                                        setGameState(GAME_STATES.TITLE_SCREEN);
+                                        setPlayer(null);
+                                    }}
+                                    className="px-8 py-4 bg-yellow-600 hover:bg-yellow-700 text-white font-bold rounded-lg text-xl transition-all transform hover:scale-105"
+                                >
+                                    Retour au menu
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (!player) return null;
+
+            const stats = getEffectiveStats();
+            const floor = FLOORS[currentFloor];
+
+            // Barre de stats en haut
+            const StatsBar = () => (
+                <div className="bg-gray-900 border-b-4 border-purple-600 p-4">
+                    <div className="max-w-7xl mx-auto grid grid-cols-4 gap-4">
+                        <div>
+                            <p className="text-gray-400 text-sm">Héros - Niv. {player.level}</p>
+                            <div className="flex items-center gap-2">
+                                <span className="text-white text-sm">HP</span>
+                                <div className="flex-1 bg-gray-700 rounded-full h-4 overflow-hidden">
+                                    <div
+                                        className="hp-bar bg-gradient-to-r from-red-600 to-red-400 h-full"
+                                        style={{ width: `${(player.currentHp / stats.maxHp) * 100}%` }}
+                                    />
+                                </div>
+                                <span className="text-white text-sm">{player.currentHp}/{stats.maxHp}</span>
+                            </div>
+                            <div className="flex items-center gap-2 mt-1">
+                                <span className="text-white text-sm">MP</span>
+                                <div className="flex-1 bg-gray-700 rounded-full h-4 overflow-hidden">
+                                    <div
+                                        className="mp-bar bg-gradient-to-r from-blue-600 to-blue-400 h-full"
+                                        style={{ width: `${(player.currentMp / stats.maxMp) * 100}%` }}
+                                    />
+                                </div>
+                                <span className="text-white text-sm">{player.currentMp}/{stats.maxMp}</span>
+                            </div>
+                        </div>
+                        <div className="text-gray-300 text-sm space-y-1">
+                            <p>⚔️ ATK: {stats.attack}</p>
+                            <p>🛡️ DEF: {stats.defense}</p>
+                        </div>
+                        <div className="text-gray-300 text-sm space-y-1">
+                            <p>✨ MAG: {stats.magic}</p>
+                            <p>⚡ SPD: {stats.speed}</p>
+                        </div>
+                        <div className="text-gray-300 text-sm space-y-1">
+                            <p>💰 Or: {player.gold}</p>
+                            <p>⭐ XP: {player.exp}/{player.expToNextLevel}</p>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            if (gameState === GAME_STATES.EXPLORATION) {
+                return (
+                    <div className={`min-h-screen ${floor.theme}`}>
+                        <StatsBar />
+                        <div className="max-w-6xl mx-auto p-6">
+                            <div className="bg-gray-800 rounded-lg p-6 mb-6 border-2 border-purple-500 fade-in">
+                                <h2 className="text-3xl font-bold text-purple-300 mb-2">
+                                    {floor.name} - Étage {currentFloor + 1}
+                                </h2>
+                                <p className="text-gray-400 mb-4">{floor.description}</p>
+                                <div className="flex items-center gap-4 text-gray-300">
+                                    <span>Salle {currentRoom + 1}/{floor.rooms}</span>
+                                    {defeatedBosses.includes(currentFloor) && (
+                                        <span className="text-green-400">✓ Boss vaincu</span>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                <button
+                                    onClick={exploreRoom}
+                                    className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-8 px-6 rounded-lg text-xl transition-all transform hover:scale-105 pulse-glow"
+                                >
+                                    🚪 Explorer la salle suivante
+                                </button>
+
+                                <button
+                                    onClick={() => setGameState(GAME_STATES.INVENTORY)}
+                                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-8 px-6 rounded-lg text-xl transition-all transform hover:scale-105"
+                                >
+                                    🎒 Inventaire
+                                </button>
+
+                                {defeatedBosses.includes(currentFloor) && currentFloor < FLOORS.length - 1 && (
+                                    <button
+                                        onClick={() => {
+                                            setCurrentFloor(currentFloor + 1);
+                                            setCurrentRoom(0);
+                                            addDialogue(`Vous descendez dans ${FLOORS[currentFloor + 1].name}...`);
+                                        }}
+                                        className="bg-green-600 hover:bg-green-700 text-white font-bold py-8 px-6 rounded-lg text-xl transition-all transform hover:scale-105"
+                                    >
+                                        ⬇️ Descendre à l'étage {currentFloor + 2}
+                                    </button>
+                                )}
+                            </div>
+
+                            {/* Équipement actuel */}
+                            <div className="mt-6 bg-gray-800 rounded-lg p-4 border-2 border-gray-700">
+                                <h3 className="text-xl font-bold text-gray-300 mb-3">Équipement actuel</h3>
+                                <div className="grid grid-cols-3 gap-4 text-gray-400 text-sm">
+                                    <div>
+                                        <span className="text-gray-500">Arme:</span>
+                                        <p className="text-white">{WEAPONS[equipment.weapon].name}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-gray-500">Armure:</span>
+                                        <p className="text-white">{ARMORS[equipment.armor].name}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-gray-500">Accessoire:</span>
+                                        <p className="text-white">{ACCESSORIES[equipment.accessory].name}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (gameState === GAME_STATES.INVENTORY) {
+                const skills = getAvailableSkills();
+
+                return (
+                    <div className="min-h-screen bg-gradient-to-b from-gray-900 to-black">
+                        <StatsBar />
+                        <div className="max-w-6xl mx-auto p-6">
+                            <div className="flex justify-between items-center mb-6">
+                                <h2 className="text-3xl font-bold text-purple-300">🎒 Inventaire & Équipement</h2>
+                                <button
+                                    onClick={() => setGameState(GAME_STATES.EXPLORATION)}
+                                    className="px-6 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg"
+                                >
+                                    ← Retour
+                                </button>
+                            </div>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                {/* Objets */}
+                                <div className="bg-gray-800 rounded-lg p-6 border-2 border-purple-500">
+                                    <h3 className="text-2xl font-bold text-purple-300 mb-4">Objets</h3>
+                                    <div className="space-y-2 max-h-96 overflow-y-auto">
+                                        {Object.entries(inventory).filter(([key, qty]) => qty > 0).length === 0 ? (
+                                            <p className="text-gray-500">Inventaire vide</p>
+                                        ) : (
+                                            Object.entries(inventory)
+                                                .filter(([key, qty]) => qty > 0)
+                                                .map(([key, qty]) => {
+                                                    const item = ITEMS[key];
+                                                    return (
+                                                        <div key={key} className="bg-gray-900 p-3 rounded-lg flex justify-between items-center">
+                                                            <div>
+                                                                <span className="text-white font-bold">{item.name}</span>
+                                                                <span className="text-gray-400 ml-2">x{qty}</span>
+                                                                <p className="text-gray-500 text-sm">{item.description}</p>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Compétences */}
+                                <div className="bg-gray-800 rounded-lg p-6 border-2 border-blue-500">
+                                    <h3 className="text-2xl font-bold text-blue-300 mb-4">Compétences</h3>
+                                    <div className="space-y-2 max-h-96 overflow-y-auto">
+                                        {skills.map(skill => (
+                                            <div key={skill.id} className="bg-gray-900 p-3 rounded-lg">
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-white font-bold">{skill.name}</span>
+                                                    <span className="text-blue-400">{skill.mpCost} MP</span>
+                                                </div>
+                                                <p className="text-gray-500 text-sm">{skill.description}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Équipement */}
+                                <div className="bg-gray-800 rounded-lg p-6 border-2 border-yellow-500 lg:col-span-2">
+                                    <h3 className="text-2xl font-bold text-yellow-300 mb-4">Équipement</h3>
+                                    <div className="grid grid-cols-3 gap-4">
+                                        <div>
+                                            <h4 className="text-lg font-bold text-yellow-400 mb-2">Arme</h4>
+                                            <div className="space-y-2">
+                                                {Object.entries(WEAPONS).map(([key, weapon]) => (
+                                                    <div
+                                                        key={key}
+                                                        className={`p-3 rounded-lg ${
+                                                            equipment.weapon === key
+                                                                ? 'bg-yellow-900 border-2 border-yellow-500'
+                                                                : 'bg-gray-900'
+                                                        }`}
+                                                    >
+                                                        <p className="text-white font-bold">{weapon.name}</p>
+                                                        <p className="text-gray-400 text-sm">ATK +{weapon.attack}</p>
+                                                        {weapon.magic && <p className="text-gray-400 text-sm">MAG +{weapon.magic}</p>}
+                                                        {weapon.critBonus && <p className="text-gray-400 text-sm">CRIT +{weapon.critBonus}%</p>}
+                                                        {weapon.lifesteal && <p className="text-gray-400 text-sm">Drain {weapon.lifesteal}%</p>}
+                                                        {weapon.allStats && <p className="text-gray-400 text-sm">Toutes stats +{weapon.allStats}</p>}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <h4 className="text-lg font-bold text-yellow-400 mb-2">Armure</h4>
+                                            <div className="space-y-2">
+                                                {Object.entries(ARMORS).map(([key, armor]) => (
+                                                    <div
+                                                        key={key}
+                                                        className={`p-3 rounded-lg ${
+                                                            equipment.armor === key
+                                                                ? 'bg-yellow-900 border-2 border-yellow-500'
+                                                                : 'bg-gray-900'
+                                                        }`}
+                                                    >
+                                                        <p className="text-white font-bold">{armor.name}</p>
+                                                        <p className="text-gray-400 text-sm">DEF +{armor.defense}</p>
+                                                        <p className="text-gray-400 text-sm">HP +{armor.hp}</p>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <h4 className="text-lg font-bold text-yellow-400 mb-2">Accessoire</h4>
+                                            <div className="space-y-2">
+                                                {Object.entries(ACCESSORIES).map(([key, acc]) => (
+                                                    <div
+                                                        key={key}
+                                                        className={`p-3 rounded-lg ${
+                                                            equipment.accessory === key
+                                                                ? 'bg-yellow-900 border-2 border-yellow-500'
+                                                                : 'bg-gray-900'
+                                                        }`}
+                                                    >
+                                                        <p className="text-white font-bold">{acc.name}</p>
+                                                        {acc.hp && <p className="text-gray-400 text-sm">HP +{acc.hp}</p>}
+                                                        {acc.mp && <p className="text-gray-400 text-sm">MP +{acc.mp}</p>}
+                                                        {acc.speed && <p className="text-gray-400 text-sm">SPD +{acc.speed}</p>}
+                                                        {acc.critBonus && <p className="text-gray-400 text-sm">CRIT +{acc.critBonus}%</p>}
+                                                        {acc.evade && <p className="text-gray-400 text-sm">Esquive {acc.evade}%</p>}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (gameState === GAME_STATES.MERCHANT) {
+                return (
+                    <div className="min-h-screen bg-gradient-to-b from-green-900 via-gray-900 to-black">
+                        <StatsBar />
+                        <div className="max-w-4xl mx-auto p-6">
+                            <div className="bg-gray-800 rounded-lg p-6 mb-6 border-2 border-green-500 fade-in">
+                                <h2 className="text-3xl font-bold text-green-300 mb-2">🛒 Marchand Ambulant</h2>
+                                <p className="text-gray-400">"Bienvenue, voyageur ! Jetez un œil à ma marchandise."</p>
+                            </div>
+
+                            <div className="bg-gray-800 rounded-lg p-6 border-2 border-gray-700 mb-6">
+                                <h3 className="text-xl font-bold text-gray-300 mb-4">Objets à vendre</h3>
+                                <div className="grid grid-cols-2 gap-4">
+                                    {Object.entries(ITEMS)
+                                        .filter(([key, item]) => merchantInventory?.[key] && item.price > 0)
+                                        .map(([key, item]) => (
+                                            <div key={key} className="bg-gray-900 p-4 rounded-lg flex justify-between items-center">
+                                                <div>
+                                                    <p className="text-white font-bold">{item.name}</p>
+                                                    <p className="text-gray-500 text-sm">{item.description}</p>
+                                                    <p className="text-yellow-400 mt-1">💰 {item.price} Or</p>
+                                                </div>
+                                                <button
+                                                    onClick={() => buyItem(key)}
+                                                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-all"
+                                                    disabled={player.gold < item.price}
+                                                >
+                                                    Acheter
+                                                </button>
+                                            </div>
+                                        ))}
+                                </div>
+
+                                <h3 className="text-xl font-bold text-gray-300 mt-6 mb-4">Équipements</h3>
+                                <div className="grid grid-cols-2 gap-4">
+                                    {Object.entries(WEAPONS)
+                                        .filter(([key, weapon]) => weapon.price > 0)
+                                        .map(([key, weapon]) => (
+                                            <div key={key} className="bg-gray-900 p-4 rounded-lg flex justify-between items-center">
+                                                <div>
+                                                    <p className="text-white font-bold">{weapon.name}</p>
+                                                    <p className="text-gray-500 text-sm">ATK +{weapon.attack}</p>
+                                                    <p className="text-yellow-400 mt-1">💰 {weapon.price} Or</p>
+                                                </div>
+                                                <button
+                                                    onClick={() => buyEquipment('weapon', key)}
+                                                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-all"
+                                                    disabled={player.gold < weapon.price || equipment.weapon === key}
+                                                >
+                                                    {equipment.weapon === key ? 'Équipé' : 'Acheter'}
+                                                </button>
+                                            </div>
+                                        ))}
+                                    {Object.entries(ARMORS)
+                                        .filter(([key, armor]) => armor.price > 0)
+                                        .map(([key, armor]) => (
+                                            <div key={key} className="bg-gray-900 p-4 rounded-lg flex justify-between items-center">
+                                                <div>
+                                                    <p className="text-white font-bold">{armor.name}</p>
+                                                    <p className="text-gray-500 text-sm">DEF +{armor.defense}, HP +{armor.hp}</p>
+                                                    <p className="text-yellow-400 mt-1">💰 {armor.price} Or</p>
+                                                </div>
+                                                <button
+                                                    onClick={() => buyEquipment('armor', key)}
+                                                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-all"
+                                                    disabled={player.gold < armor.price || equipment.armor === key}
+                                                >
+                                                    {equipment.armor === key ? 'Équipé' : 'Acheter'}
+                                                </button>
+                                            </div>
+                                        ))}
+                                    {Object.entries(ACCESSORIES)
+                                        .filter(([key, acc]) => acc.price > 0)
+                                        .map(([key, acc]) => (
+                                            <div key={key} className="bg-gray-900 p-4 rounded-lg flex justify-between items-center">
+                                                <div>
+                                                    <p className="text-white font-bold">{acc.name}</p>
+                                                    <p className="text-gray-500 text-sm">
+                                                        {acc.hp && `HP +${acc.hp}`}
+                                                        {acc.mp && `MP +${acc.mp}`}
+                                                        {acc.speed && `SPD +${acc.speed}`}
+                                                    </p>
+                                                    <p className="text-yellow-400 mt-1">💰 {acc.price} Or</p>
+                                                </div>
+                                                <button
+                                                    onClick={() => buyEquipment('accessory', key)}
+                                                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-all"
+                                                    disabled={player.gold < acc.price || equipment.accessory === key}
+                                                >
+                                                    {equipment.accessory === key ? 'Équipé' : 'Acheter'}
+                                                </button>
+                                            </div>
+                                        ))}
+                                </div>
+                            </div>
+
+                            {battleLog.length > 0 && (
+                                <div className="bg-gray-900 rounded-lg p-4 mb-4 max-h-32 overflow-y-auto">
+                                    {battleLog.slice(-5).map(log => (
+                                        <p key={log.id} className={`text-sm ${
+                                            log.type === 'success' ? 'text-green-400' :
+                                            log.type === 'danger' ? 'text-red-400' :
+                                            log.type === 'warning' ? 'text-yellow-400' :
+                                            'text-gray-400'
+                                        }`}>
+                                            {log.message}
+                                        </p>
+                                    ))}
+                                </div>
+                            )}
+
+                            <button
+                                onClick={() => {
+                                    setGameState(GAME_STATES.EXPLORATION);
+                                    setBattleLog([]);
+                                }}
+                                className="w-full px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-all"
+                            >
+                                Partir
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (gameState === GAME_STATES.COMBAT) {
+                const skills = getAvailableSkills();
+                const [selectedAction, setSelectedAction] = useState(null);
+
+                return (
+                    <div className="min-h-screen bg-gradient-to-b from-red-900 via-gray-900 to-black">
+                        <StatsBar />
+                        <div className="max-w-6xl mx-auto p-6">
+                            {/* Ennemi */}
+                            <div className="bg-gray-800 rounded-lg p-6 mb-6 border-4 border-red-500 fade-in">
+                                <div className="text-center mb-4">
+                                    <h2 className="text-3xl font-bold text-red-400 mb-2">
+                                        {combat.enemy.name}
+                                        {combat.enemy.boss && <span className="ml-2 text-yellow-400">👑 BOSS</span>}
+                                    </h2>
+                                    <div className="flex items-center justify-center gap-2 mb-2">
+                                        <span className="text-gray-400">HP</span>
+                                        <div className="w-96 bg-gray-700 rounded-full h-6 overflow-hidden">
+                                            <div
+                                                className="hp-bar bg-gradient-to-r from-red-600 to-red-400 h-full transition-all"
+                                                style={{ width: `${(combat.enemy.currentHp / combat.enemy.maxHp) * 100}%` }}
+                                            />
+                                        </div>
+                                        <span className="text-white">{combat.enemy.currentHp}/{combat.enemy.maxHp}</span>
+                                    </div>
+                                    <div className="text-gray-400 text-sm space-x-4">
+                                        <span>⚔️ {combat.enemy.attack}</span>
+                                        <span>🛡️ {combat.enemy.defense}</span>
+                                        <span>⚡ {combat.enemy.speed}</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Log de combat */}
+                            <div className="bg-gray-900 rounded-lg p-4 mb-6 h-40 overflow-y-auto border-2 border-gray-700">
+                                <h3 className="text-lg font-bold text-gray-400 mb-2">📜 Combat</h3>
+                                {battleLog.map(log => (
+                                    <p key={log.id} className={`text-sm mb-1 ${
+                                        log.type === 'success' ? 'text-green-400' :
+                                        log.type === 'danger' ? 'text-red-400' :
+                                        log.type === 'warning' ? 'text-yellow-400' :
+                                        'text-gray-400'
+                                    }`}>
+                                        • {log.message}
+                                    </p>
+                                ))}
+                            </div>
+
+                            {/* Actions */}
+                            <div className="grid grid-cols-2 gap-4">
+                                {/* Compétences */}
+                                <div className="bg-gray-800 rounded-lg p-4 border-2 border-blue-500">
+                                    <h3 className="text-xl font-bold text-blue-300 mb-3">⚔️ Compétences</h3>
+                                    <div className="space-y-2 max-h-96 overflow-y-auto">
+                                        {skills.map(skill => {
+                                            const canUse = player.currentMp >= skill.mpCost;
+                                            return (
+                                                <button
+                                                    key={skill.id}
+                                                    onClick={() => playerAction({ type: 'skill', skill })}
+                                                    disabled={!canUse}
+                                                    className={`w-full text-left p-3 rounded-lg transition-all ${
+                                                        canUse
+                                                            ? 'bg-blue-900 hover:bg-blue-800 border-2 border-blue-600'
+                                                            : 'bg-gray-900 border-2 border-gray-700 opacity-50 cursor-not-allowed'
+                                                    }`}
+                                                >
+                                                    <div className="flex justify-between items-center">
+                                                        <span className="text-white font-bold">{skill.name}</span>
+                                                        <span className="text-blue-400">{skill.mpCost} MP</span>
+                                                    </div>
+                                                    <p className="text-gray-400 text-sm">{skill.description}</p>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                {/* Objets & Actions */}
+                                <div>
+                                    <div className="bg-gray-800 rounded-lg p-4 border-2 border-green-500 mb-4">
+                                        <h3 className="text-xl font-bold text-green-300 mb-3">🎒 Objets</h3>
+                                        <div className="space-y-2 max-h-64 overflow-y-auto">
+                                            {Object.entries(inventory)
+                                                .filter(([key, qty]) => qty > 0 && ITEMS[key].effect !== 'revive')
+                                                .length === 0 ? (
+                                                <p className="text-gray-500 text-sm">Aucun objet utilisable</p>
+                                            ) : (
+                                                Object.entries(inventory)
+                                                    .filter(([key, qty]) => qty > 0 && ITEMS[key].effect !== 'revive')
+                                                    .map(([key, qty]) => {
+                                                        const item = ITEMS[key];
+                                                        return (
+                                                            <button
+                                                                key={key}
+                                                                onClick={() => playerAction({ type: 'item', itemKey: key })}
+                                                                className="w-full text-left p-3 rounded-lg bg-green-900 hover:bg-green-800 border-2 border-green-600 transition-all"
+                                                            >
+                                                                <div className="flex justify-between items-center">
+                                                                    <span className="text-white font-bold">{item.name}</span>
+                                                                    <span className="text-gray-400">x{qty}</span>
+                                                                </div>
+                                                                <p className="text-gray-400 text-sm">{item.description}</p>
+                                                            </button>
+                                                        );
+                                                    })
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Fuir */}
+                                    {!combat.enemy.boss && (
+                                        <button
+                                            onClick={() => playerAction({ type: 'flee' })}
+                                            className="w-full px-6 py-3 bg-yellow-700 hover:bg-yellow-600 text-white font-bold rounded-lg transition-all"
+                                        >
+                                            🏃 Fuir
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Statuts actifs */}
+                            {(combat.playerDefending || combat.playerFocused) && (
+                                <div className="mt-4 bg-blue-900 border-2 border-blue-500 rounded-lg p-3">
+                                    <p className="text-blue-200 font-bold">
+                                        Statuts actifs :
+                                        {combat.playerDefending && <span className="ml-2">🛡️ Défense</span>}
+                                        {combat.playerFocused && <span className="ml-2">✨ Concentration</span>}
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            }
+
+            return null;
+        }
+
+        // Rendu de l'application
+        ReactDOM.render(<DungeonRPG />, document.getElementById('root'));
+    </script>
+</body>
+</html>
